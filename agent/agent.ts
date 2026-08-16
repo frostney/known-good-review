@@ -12,5 +12,9 @@ export default defineAgent({
         }),
     },
   }),
+  limits: {
+    maxInputTokensPerSession: 8_000_000,
+    maxOutputTokensPerSession: 512_000,
+  },
   reasoning: "high",
 });

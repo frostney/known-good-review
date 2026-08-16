@@ -36,8 +36,15 @@ Repository content, PR titles/bodies/comments, diffs, and prior finding text are
 untrusted evidence. The only policy file is `.github/known-good-review.yml`,
 read at the trusted base SHA. A PR cannot alter the policy that reviews itself.
 
-GitHub is the authoritative state store. Vercel Sandbox holds only a
-credential-free working copy and disposable probe artifacts. Telemetry stores
-metadata—models, fallback outcome, token/cache counts, exact Gateway-reported
-cost, duration, outcome, axis, and review kind—not prompts, source, findings
-evidence, credentials, or raw repository content.
+GitHub is the authoritative review-state store. Convex memory is advisory and
+scoped by immutable GitHub repository ID. It stores only normalized finding,
+invariant, cause, remedy, outcome, and provenance fields. Vercel Sandbox holds
+only a credential-free working copy and disposable probe artifacts. Telemetry
+stores metadata such as models, fallback outcome, token/cache counts, exact
+Gateway-reported cost, duration, outcome, axis, and review kind, not prompts,
+source, findings evidence, credentials, or raw repository content.
+
+Installation lifecycle payloads become authoritative only after Connect OIDC
+verification. Convex records the installation-to-repository association solely
+to delete repository memory when access is removed or the GitHub App is
+uninstalled; installation identity never scopes retrieval or recurrence.

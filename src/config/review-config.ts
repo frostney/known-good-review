@@ -1,19 +1,28 @@
 import { parse } from "yaml";
 import { z } from "zod";
+import {
+  embeddingConfigSchema,
+  type EmbeddingConfig,
+} from "../memory/contracts";
 import { reviewAxes, type ReviewAxis } from "../review/axes";
 
-export const defaultModel = "openai/gpt-5.6-sol" as const;
-export const allowedModels = [
-  defaultModel,
-  "anthropic/claude-opus-5",
+export const defaultModels = [
+  "openai/gpt-5.6-sol",
   "moonshotai/kimi-k3",
+  "anthropic/claude-opus-5",
 ] as const;
+export const defaultModel = defaultModels[0];
+export const defaultEmbedding: EmbeddingConfig = {
+  model: "voyage/voyage-4",
+  dimension: 1024,
+};
 
-export type AllowedModel = (typeof allowedModels)[number];
-export type ModelChain = readonly [AllowedModel, ...AllowedModel[]];
+export type ModelChain = readonly [string, ...string[]];
 
 export interface ReviewConfig {
   readonly model: ModelChain;
+  readonly embedding: EmbeddingConfig;
+  readonly publicRoots: readonly string[];
   readonly agents:
     | { readonly kind: "inherit" }
     | { readonly kind: "all"; readonly models: ModelChain }
@@ -26,6 +35,9 @@ export interface ReviewConfig {
 const rawConfigSchema = z
   .object({
     model: z.string().optional(),
+    embedding: z.string().optional(),
+    embeddingDimension: z.number().int().optional(),
+    publicRoots: z.array(z.string().min(1)).optional(),
     agents: z
       .union([
         z.string(),
@@ -41,10 +53,20 @@ const rawConfigSchema = z
   })
   .strict();
 
+const gatewayModelIdPattern = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:-]*$/i;
+
+function parseModelId(value: string, field: string): string {
+  const model = value.trim();
+  if (!gatewayModelIdPattern.test(model)) {
+    throw new Error(`${field} must be an AI Gateway creator/model identifier`);
+  }
+  return model;
+}
+
 function parseModelChain(value: string, field: string): ModelChain {
   const models = value
     .split(",")
-    .map((model) => model.trim())
+    .map((model) => parseModelId(model, field))
     .filter((model) => model.length > 0);
 
   if (models.length === 0) {
@@ -56,24 +78,36 @@ function parseModelChain(value: string, field: string): ModelChain {
     throw new Error(`${field} must not repeat a model`);
   }
 
-  for (const model of unique) {
-    if (!(allowedModels as readonly string[]).includes(model)) {
-      throw new Error(
-        `${field} contains unknown model ${JSON.stringify(model)}; allowed models: ${allowedModels.join(", ")}`,
-      );
-    }
-  }
-
-  const [first, ...rest] = unique as AllowedModel[];
+  const [first, ...rest] = unique;
   if (first === undefined) {
     throw new Error(`${field} must contain at least one model`);
   }
   return [first, ...rest];
 }
 
+function parsePublicRoots(roots: readonly string[] | undefined): string[] {
+  return (roots ?? []).map((root) => {
+    const normalized = root.replace(/^\.\//, "").replace(/\/$/, "");
+    if (
+      normalized.length === 0 ||
+      normalized.startsWith("/") ||
+      normalized.includes("\\") ||
+      normalized.split("/").includes("..")
+    ) {
+      throw new Error(`publicRoots contains invalid repository path ${JSON.stringify(root)}`);
+    }
+    return normalized;
+  });
+}
+
 export function parseReviewConfig(source: string | null | undefined): ReviewConfig {
   if (source === null || source === undefined || source.trim() === "") {
-    return { model: [defaultModel], agents: { kind: "inherit" } };
+    return {
+      model: [...defaultModels],
+      embedding: defaultEmbedding,
+      publicRoots: [],
+      agents: { kind: "inherit" },
+    };
   }
 
   let document: unknown;
@@ -92,14 +126,28 @@ export function parseReviewConfig(source: string | null | undefined): ReviewConf
     );
   }
 
-  const model = parseModelChain(result.data.model ?? defaultModel, "model");
+  const model = parseModelChain(
+    result.data.model ?? defaultModels.join(","),
+    "model",
+  );
+  const embedding = embeddingConfigSchema.parse({
+    model: parseModelId(
+      result.data.embedding ?? defaultEmbedding.model,
+      "embedding",
+    ),
+    dimension:
+      result.data.embeddingDimension ?? defaultEmbedding.dimension,
+  });
   const agents = result.data.agents;
+  const publicRoots = parsePublicRoots(result.data.publicRoots);
   if (agents === undefined) {
-    return { model, agents: { kind: "inherit" } };
+    return { model, embedding, publicRoots, agents: { kind: "inherit" } };
   }
   if (typeof agents === "string") {
     return {
       model,
+      embedding,
+      publicRoots,
       agents: { kind: "all", models: parseModelChain(agents, "agents") },
     };
   }
@@ -112,7 +160,12 @@ export function parseReviewConfig(source: string | null | undefined): ReviewConf
     }
   }
 
-  return { model, agents: { kind: "axes", models } };
+  return {
+    model,
+    embedding,
+    publicRoots,
+    agents: { kind: "axes", models },
+  };
 }
 
 export function modelsForAxis(

@@ -21,7 +21,7 @@ const oldFiles = [
 
 function completedState(): ReviewState {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     app: "known-good-review",
     pullRequest: 7,
     initialFullStatus: "completed",
@@ -130,7 +130,7 @@ describe("GitHub inbound planning", () => {
 
   test("resets debounce but immediately supersedes a running initial review", () => {
     const pending = (status: "debouncing" | "running"): ReviewState => ({
-      schemaVersion: 1,
+      schemaVersion: 2,
       app: "known-good-review",
       pullRequest: 7,
       initialFullStatus: status,

@@ -9,6 +9,7 @@ import {
 } from "eve/channels/github";
 import { z } from "zod";
 import { parseReviewConfig } from "../../src/config/review-config";
+import { validateConfiguredModels } from "../../src/models/catalog";
 import { githubAdapter, githubConnector } from "../../src/github/chat-adapter";
 import {
   parsePullRequestFiles,
@@ -27,7 +28,10 @@ import {
 } from "../../src/github/publication";
 import { pendingReviewState } from "../../src/github/review-state";
 import { withTrustedReviewContext } from "../../src/github/trusted-context";
+import { handleGitHubLifecycleWebhook } from "../../src/github/lifecycle";
+import { requestMemoryDeletion } from "../../src/memory/client";
 import { findingsToRevalidate } from "../../src/review/revalidation";
+import { discoverabilityApplies } from "../../src/review/discoverability";
 
 const supportedActions = new Set([
   "closed",
@@ -44,6 +48,11 @@ const contentSchema = z.object({
 });
 
 const permissionSchema = z.object({ permission: z.string() });
+const repositoryDetailsSchema = z.object({
+  node_id: z.string().min(1),
+  created_at: z.string().datetime(),
+});
+const accessibleRepositorySchema = z.object({ node_id: z.string().min(1) });
 
 async function fetchPullRequest(ctx: GitHubInboundContext, number: number) {
   const response = await ctx.github.request({
@@ -51,6 +60,31 @@ async function fetchPullRequest(ctx: GitHubInboundContext, number: number) {
     path: `/repos/${ctx.repository.owner}/${ctx.repository.name}/pulls/${number}`,
   });
   return pullRequestDetailsSchema.parse(response.body);
+}
+
+async function fetchRepositoryDetails(ctx: GitHubInboundContext) {
+  const response = await ctx.github.request({
+    method: "GET",
+    path: `/repos/${ctx.repository.owner}/${ctx.repository.name}`,
+  });
+  const repository = repositoryDetailsSchema.parse(response.body);
+  return {
+    repositoryId: repository.node_id,
+    repositoryCreatedAt: Date.parse(repository.created_at),
+  };
+}
+
+async function listAccessibleRepositoryIds(
+  installationId: number,
+): Promise<string[]> {
+  const adapter = githubAdapter(installationId);
+  const repositories = await adapter.octokit.paginate(
+    adapter.octokit.rest.apps.listReposAccessibleToInstallation,
+    { per_page: 100 },
+  );
+  return repositories.map(
+    (repository) => accessibleRepositorySchema.parse(repository).node_id,
+  );
 }
 
 async function fetchAllPages(
@@ -118,6 +152,8 @@ function publicationContext(
   pullRequest: number,
   baseSha: string,
   headSha: string,
+  repositoryId: string,
+  repositoryCreatedAt: number,
   patchFingerprint?: string,
 ) {
   const installationId = ctx.github.installationId;
@@ -129,6 +165,8 @@ function publicationContext(
     owner: ctx.repository.owner,
     repo: ctx.repository.name,
     repository: ctx.repository.fullName,
+    repositoryId,
+    repositoryCreatedAt,
     pullRequest,
     baseSha,
     headSha,
@@ -151,6 +189,7 @@ async function dispatchReview(input: {
   const pullRequestNumber = input.ctx.conversation.pullRequestNumber;
   if (!pullRequestNumber) return null;
   const pullRequest = await fetchPullRequest(input.ctx, pullRequestNumber);
+  const repositoryDetails = await fetchRepositoryDetails(input.ctx);
 
   if (input.action === "opened" && pullRequest.draft) return null;
 
@@ -162,6 +201,8 @@ async function dispatchReview(input: {
       event: input.action,
       headSha: pullRequest.head.sha,
       plan,
+      ...repositoryDetails,
+      reviewFiles: [],
     });
     return {
       auth,
@@ -186,9 +227,13 @@ async function dispatchReview(input: {
     pullRequestNumber,
     pullRequest.base.sha,
     pullRequest.head.sha,
+    repositoryDetails.repositoryId,
+    repositoryDetails.repositoryCreatedAt,
   );
+  let reviewConfig;
   try {
-    parseReviewConfig(configSource);
+    reviewConfig = parseReviewConfig(configSource);
+    await validateConfiguredModels(reviewConfig);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await publishFailClosedCheck({
@@ -203,8 +248,12 @@ async function dispatchReview(input: {
     action: input.action,
     draft: pullRequest.draft,
     head: pullRequest.head.sha,
-    manualFull: input.manualFull,
-    manualFullAuthorized: input.manualFullAuthorized,
+    ...(input.manualFull === undefined
+      ? {}
+      : { manualFull: input.manualFull }),
+    ...(input.manualFullAuthorized === undefined
+      ? {}
+      : { manualFullAuthorized: input.manualFullAuthorized }),
     patchFiles,
     state,
   });
@@ -213,6 +262,8 @@ async function dispatchReview(input: {
     pullRequestNumber,
     pullRequest.base.sha,
     pullRequest.head.sha,
+    repositoryDetails.repositoryId,
+    repositoryDetails.repositoryCreatedAt,
     dispatch.patchFingerprint,
   );
   const octokit = githubAdapter(context.installationId).octokit;
@@ -276,6 +327,19 @@ async function dispatchReview(input: {
     patchFingerprint: dispatch.patchFingerprint,
     exactFiles:
       dispatch.plan.kind === "delta" ? dispatch.changedFiles : undefined,
+    activeAxes: [
+      "deduplication",
+      "claim-and-specification",
+      "engineering-quality",
+      ...(discoverabilityApplies(
+        dispatch.plan.kind === "delta"
+          ? dispatch.changedFiles
+          : patchFiles.map((file) => file.path),
+        reviewConfig.publicRoots,
+      )
+        ? ["discoverability"]
+        : []),
+    ],
     priorFindings:
       dispatch.plan.kind === "delta" && dispatch.priorReport
         ? {
@@ -302,8 +366,18 @@ async function dispatchReview(input: {
     configSource,
     event: input.action,
     headSha: pullRequest.head.sha,
-    patchFingerprint: dispatch.patchFingerprint,
+    ...(dispatch.patchFingerprint === undefined
+      ? {}
+      : { patchFingerprint: dispatch.patchFingerprint }),
     plan: JSON.stringify(dispatch.plan),
+    ...repositoryDetails,
+    reviewFiles: patchFiles
+      .filter(
+        (file) =>
+          dispatch.plan.kind !== "delta" ||
+          dispatch.changedFiles.includes(file.path),
+      )
+      .map((file) => ({ path: file.path, status: file.status })),
   });
   return {
     auth,
@@ -353,9 +427,10 @@ async function onComment(ctx: GitHubInboundContext, comment: GitHubComment) {
   });
 }
 
-export default githubChannel({
+const githubCredentials = connectGitHubCredentials(githubConnector);
+const channel = githubChannel({
   botName: "known-good-review",
-  credentials: connectGitHubCredentials(githubConnector),
+  credentials: githubCredentials,
   turnPolicy: "steer",
   progress: { reactions: false },
   onPullRequest,
@@ -366,3 +441,48 @@ export default githubChannel({
     "message.completed": () => {},
   },
 });
+
+const githubRoute = channel.routes.find(
+  (route) => route.method === "POST" && route.path === "/eve/v1/github",
+);
+if (!githubRoute || githubRoute.method !== "POST") {
+  throw new Error("Eve GitHub channel did not expose its expected HTTP route");
+}
+const verifier = githubCredentials.webhookVerifier;
+if (!verifier) {
+  throw new Error("Vercel Connect GitHub credentials did not provide a verifier");
+}
+
+export default {
+  ...channel,
+  routes: channel.routes.map((route) =>
+    route === githubRoute
+      ? {
+          ...githubRoute,
+          handler: async (
+            request: Request,
+            context: Parameters<typeof githubRoute.handler>[1],
+          ) =>
+            (await handleGitHubLifecycleWebhook({
+              request,
+              verifier,
+              deleteRepositories: (repositoryIds) =>
+                requestMemoryDeletion({
+                  kind: "repositories",
+                  repositoryIds: [...repositoryIds],
+                }),
+              reconcileInstallation: (
+                installationId,
+                retainedRepositoryIds,
+              ) =>
+                requestMemoryDeletion({
+                  kind: "installation",
+                  installationId,
+                  retainedRepositoryIds: [...retainedRepositoryIds],
+                }),
+              listAccessibleRepositories: listAccessibleRepositoryIds,
+            })) ?? githubRoute.handler(request, context),
+        }
+      : route,
+  ),
+};

@@ -42,10 +42,13 @@ flowchart TD
   replacement full review. A write/maintain/admin user can explicitly request
   one with `@known-good-review run full review`.
 
-GitHub comments hold the versioned review state and complete v2 findings
-artifact. There is no application database. The state allows the next webhook
-to distinguish the first review, an exact delta, a semantic no-op, and a lost
-baseline.
+GitHub comments hold the authoritative versioned review state and complete v2
+findings artifact. Convex stores advisory, repository-scoped cross-PR memory
+through `@convex-dev/rag`; it never owns the current verdict, baseline, or
+finding status. Recent matches remain individual while older matches collapse
+to bounded semantic-cluster representatives after the repository has enough
+review history. The GitHub state allows the next webhook to distinguish the
+first review, an exact delta, a semantic no-op, and a lost baseline.
 
 ## Trusted repository configuration
 
@@ -56,17 +59,23 @@ Unknown keys or models fail closed.
 ```yaml
 model: openai/gpt-5.6-sol
 agents: moonshotai/kimi-k3
+embedding: voyage/voyage-4
+embeddingDimension: 1024
+publicRoots:
+  - website
 ```
 
-`model` defaults to `openai/gpt-5.6-sol`. Allowed model IDs are:
+`model` defaults to this ordered AI Gateway fallback chain:
 
 - `openai/gpt-5.6-sol`
-- `anthropic/claude-opus-5`
 - `moonshotai/kimi-k3`
+- `anthropic/claude-opus-5`
 
-Comma-separated IDs form an ordered AI Gateway fallback chain. `agents` is
-optional: a string applies one chain to every subagent, while a mapping can
-override exact `code-review` axes without creating a second lane system:
+Any currently listed AI Gateway language model with tool use is accepted;
+there is no model allowlist. Comma-separated IDs form an ordered fallback
+chain. `agents` is optional: a string applies one chain to every subagent,
+while a mapping can override exact `code-review` axes without creating a
+second lane system:
 
 ```yaml
 model: openai/gpt-5.6-sol, anthropic/claude-opus-5
@@ -76,6 +85,18 @@ agents:
   engineering-quality: openai/gpt-5.6-sol
   discoverability: moonshotai/kimi-k3
 ```
+
+`embedding` accepts any currently listed AI Gateway embedding model.
+`embeddingDimension` must match that model's default output and one of Convex
+RAG's supported vector sizes. The defaults are `voyage/voyage-4` and 1024.
+Changing either value re-embeds the repository in a parallel namespace and
+promotes it only after the replacement is ready.
+
+`publicRoots` declares repository-relative public-content trees from the
+trusted base. Discoverability also activates for explicit website, SEO,
+landing, blog, legal, robots, sitemap, social-image, favicon, and icon paths.
+Generic framework pages, API routes, schemas, manifests, and docs do not imply
+publicness.
 
 The coordinator and each invocation use one successful model. AI Gateway tries
 only the explicitly listed fallbacks when the primary fails. Revalidation uses
@@ -91,13 +112,16 @@ current Eve/Vercel runtime contract.
 
 ```bash
 bun install
+bunx convex dev
 bun run check
 bun run dev
 ```
 
 `bun run check` type-checks, runs the deterministic unit suite, inspects Eve's
 discovered surface, and builds without provisioning a hosted sandbox snapshot.
-It does not call a paid model.
+It does not call a paid model. Convex code is also type-checked locally; a
+Convex deployment is needed only to regenerate bindings or exercise HTTP
+actions.
 
 The production sandbox has GitHub-only egress, no repository credentials, and
 one persistent Eve sandbox per PR session. Eve stops compute after each turn
@@ -110,14 +134,29 @@ delete.
 ## External setup not performed by this scaffold
 
 When authorized later, provision the Connect-backed GitHub App with Eve's
-current setup flow, deploy the app to Vercel, and install it on selected
-repositories. The app needs repository metadata read, contents read, pull
-requests read/write, issues read/write, and checks read/write. Subscribe to
-`pull_request` and `issue_comment` events and route Connect to `/eve/v1/github`.
+current setup flow, create the Convex deployment, deploy the app to Vercel,
+and install it on selected repositories. Give Convex its AI Gateway key and
+the shared memory bearer token; give Eve the Convex HTTP-actions URL and the
+same token. The app needs repository metadata read, contents read, pull
+requests read/write, issues read/write, and checks read/write. Forward
+`pull_request`, `issue_comment`, `installation`, and
+`installation_repositories` events through Connect to `/eve/v1/github`.
 
-Do not add a second Chat SDK webhook route. Eve's GitHub channel owns inbound
-verification, durable PR sessions, checkout, and steering. The Chat SDK adapter
-is the typed outbound publication boundary for Check Runs and finding comments.
+The single GitHub route verifies installation lifecycle events with the same
+Connect OIDC verifier as Eve. Exact repository removals delete memory by
+immutable GitHub repository node ID. A complete uninstall deletes every
+repository remembered for that installation; the installation association is
+cleanup metadata and never becomes the memory namespace. The authenticated
+Convex `/memory/delete` endpoint accepts the cleanup before the webhook is
+acknowledged, then performs bounded, retrying, race-safe namespace deletion.
+When GitHub reports an all-to-selected access change with an empty removal
+list, the route reconciles memory against the repositories still accessible to
+the installation.
+
+Do not add a second Chat SDK webhook route. The decorated Eve route owns inbound
+verification, lifecycle cleanup, durable PR sessions, checkout, and steering.
+The Chat SDK adapter is the typed outbound publication boundary for Check Runs,
+finding comments, and the rare installation-reconciliation API read.
 
 See [architecture](docs/architecture.md), [domain context](CONTEXT.md), and
 [skill provenance](docs/skill-provenance.md).

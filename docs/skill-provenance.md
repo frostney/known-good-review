@@ -12,6 +12,7 @@ CLI (`skills` 1.5.22). No skill directory was populated with an ad-hoc file copy
 - Source pull request: `https://github.com/frostney/known-good-route/pull/38`
 - Consumed merged revision: `e3aad669dc127e5af6b1fea1ccccf0cc70b0e093`
 - Commit subject: `feat(code-review): define review axes and v2 findings (#38)`
+- Latest checked main revision: `0b54d8adb0b2a827120a954d5905827e51d3236b`
 
 The local commit clarifies fresh review, targeted revalidation, and combined
 operations; names review axes consistently; requires one lane per active axis;
@@ -20,9 +21,12 @@ uses all-candidate collection before coordinator filtering; and upgrades both
 reader or migration.
 
 The complete `code-review` skill, including all four references, is installed
-into `agent/skills/code-review` for Eve and is byte-identical to the merged
-known-good-route source. The same merged revision supplies the project-local
-known-good-route development suite under `.agents/skills`. `skills-lock.json`
+into `agent/skills/code-review` for Eve. The Skills CLI normalizes its
+frontmatter for Eve; its procedure and references come from the same current
+known-good-route source as the development copy. The applicable project-local
+suite under `.agents/skills` now also includes `agent-writing` and
+`typescript-stack`. The catalog's Convex, React, and FreePascal stack skills are
+not installed because they do not apply to this repository. `skills-lock.json`
 records `frostney/known-good-route` as the source and the Skills CLI content hash
 for every installed skill; this repository does not author those skills.
 

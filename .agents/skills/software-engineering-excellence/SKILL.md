@@ -47,8 +47,9 @@ solution rather than merely select details within it.
 
 For genuinely multi-layer work, establish a thin runnable path and deepen it in
 increments. Validate material performance changes against a relevant baseline.
-Follow the surrounding code's comment density and idiom; explain non-obvious
-decisions.
+Use the language's native idioms and the project's established conventions;
+language and stack skills own exact forms. Follow surrounding comment density
+and explain non-obvious decisions.
 
 ## Context boundaries
 

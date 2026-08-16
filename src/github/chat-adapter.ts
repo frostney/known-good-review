@@ -6,13 +6,12 @@ export const githubConnector =
   "github/known-good-review";
 
 export function githubAdapter(installationId: number) {
+  const botUserId = process.env.GITHUB_BOT_USER_ID;
   return createGitHubAdapter({
     ...connectGitHubAdapter(githubConnector, {
       installationId: String(installationId),
     }),
-    botUserId: process.env.GITHUB_BOT_USER_ID
-      ? Number(process.env.GITHUB_BOT_USER_ID)
-      : undefined,
+    ...(botUserId ? { botUserId: Number(botUserId) } : {}),
     userName: "known-good-review[bot]",
   });
 }

@@ -9,8 +9,8 @@ description: >-
 license: Unlicense OR MIT
 compatibility: >-
   Requires a registered grilling skill and access to the workstream's available
-  conversation, repository, and forge evidence. Selected tickets also require
-  create-issue and forge access.
+  conversation, repository, and forge evidence. HTML report rendering requires
+  Python 3. Selected tickets also require create-issue and forge access.
 ---
 
 # Run retrospective
@@ -18,7 +18,10 @@ compatibility: >-
 Assess the completed workstream through delivery-speed, process, and
 codebase-health lenses. The actual `grilling` skill owns the decision loop.
 Apply only documentation edits and ticket actions the user selects from the
-detailed summary.
+detailed summary. Every run also produces an HTML impact report under
+[references/html-report.md](references/html-report.md); creating or refreshing
+that report is authorized by the retrospective request, but committing,
+publishing, and all other edits are not.
 
 ## Gates
 
@@ -78,24 +81,35 @@ selects its exact proposed contents.
    attribution.
 4. Remove unsupported, session-specific, duplicate, and already-covered
    candidates; classify the rest using the routes above.
-5. Run `grilling` one decision at a time with the boundary, evidence, current
-   docs, absences, and candidates.
-6. Present the detailed summary:
+5. Draft one impact card per key delivered change or material outcome. Follow
+   the HTML contract, render with its helper, and verify the file. Each impact
+   item is at most 300 characters and has evidence-backed Before and After
+   states. Add a mechanism diagram when the change alters a pattern, lifecycle,
+   state flow, or interaction across at least three meaningful elements.
+6. Run `grilling` one decision at a time with the boundary, evidence, current
+   docs, absences, candidates, and report path. Explicitly offer to deep-dive
+   into any impact card with the user. Use a host-supplied app link when one is
+   available; never invent an undocumented route. The copyable prompt remains
+   required. A selected deep dive may regenerate the report before selection.
+7. Present the detailed summary:
    - findings under every lens, including no-finding results;
    - lifecycle and selected surface profiles, exclusive critical-path ranking,
      masked or overlapping work, ground-level build/test/tool timings, aggregate
      resource totals, evidence provenance, and confidence gaps;
+   - the HTML report path and its key impact cards, Before/After states, and
+     available deep dives;
    - exact proposed documentation additions, replacements, or removals by file;
    - concise ticket summaries with all available action paths;
    - report-only observations, supporting evidence, confidence, and gaps.
-7. Obtain exact user selections through `grilling`. More detail or further
+8. Obtain exact user selections through `grilling`. More detail or further
    grilling returns to that loop and regenerates the summary.
-8. Apply only selected documentation changes, preserving structure and avoiding
+9. Apply only selected documentation changes, preserving structure and avoiding
    duplication. Run only the selected ticket actions through `create-issue`.
-9. Compare the result with the confirmed action set, reread edited sections, and
+10. Compare the result with the confirmed action set, reread edited sections, and
    run declared documentation checks.
-10. Report changed docs, created issue links, report-only findings, confidence
-   limits, and observed validation. Keep workstream history in chat.
+11. Report the HTML path, changed docs, created issue links, report-only
+    findings, confidence limits, and observed validation. Keep workstream
+    history in chat and remind the user they can request a deep dive by card.
 
 Confirmation does not authorize commits, pushes, PRs, unselected issues, or
 other file edits. The original request to run a retrospective is not this final
