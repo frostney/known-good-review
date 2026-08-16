@@ -7,6 +7,6 @@ node_modules
 .nitro
 dist
 coverage
-.agent/waits
+.agent/
 .DS_Store
 *.tsbuildinfo
