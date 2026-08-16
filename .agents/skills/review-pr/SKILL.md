@@ -26,6 +26,16 @@ same exact-head convergence contract passes.
   out-of-scope findings. Do not post top-level PR summaries or issue comments.
   In `automatic-merge` mode, a documented automation retrigger command is the
   only allowed top-level comment.
+- Before any substantive review post or reply, resolve the authenticated GitHub
+  username and exact model name from current forge and host evidence. Stop if
+  either is unavailable; never guess. End each reply with this GitHub Note and
+  keep the full reply at 300 characters or fewer:
+
+  > [!NOTE]
+  > Created on behalf of @username using ModelName.
+
+  Do not append attribution to an exact automation retrigger command because
+  extra text can invalidate it.
 - Validate findings before changing code and run the relevant project checks
   after fixes.
 - Discover active review tools from current repository configuration, branch
@@ -86,7 +96,8 @@ errored, missing, or head-ambiguous verdict is pending rather than passed.
    resolve completed threads through its explicit `resolve` operation. Dismiss invalid,
    obsolete, duplicate, or out-of-scope findings only with evidence. Never
    silently ignore a nitpick, and never substitute a top-level comment when an
-   inline comment cannot accept a reply.
+   inline comment cannot accept a reply. Resolve attribution identities before
+   the first reply and append the required Note to every substantive reply.
 5. Run checks relevant to the changed behavior, including rendered UI and
    accessibility checks for user-facing changes.
 6. Use `/update-pr` to commit and push. If unavailable, follow its documented

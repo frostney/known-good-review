@@ -8,6 +8,9 @@ export const reviewContextAttributes = {
   headSha: "known_good_review_head_sha",
   patchFingerprint: "known_good_review_patch_fingerprint",
   plan: "known_good_review_plan",
+  reviewFiles: "known_good_review_files",
+  repositoryCreatedAt: "known_good_review_repository_created_at",
+  repositoryId: "known_good_review_repository_id",
 } as const;
 
 const trustedGitHubContextSchema = z.object({
@@ -16,6 +19,8 @@ const trustedGitHubContextSchema = z.object({
   repo: z.string().min(1),
   pullRequest: z.coerce.number().int().positive(),
   repository: z.string().regex(/^[^/]+\/[^/]+$/),
+  repositoryCreatedAt: z.coerce.number().int().nonnegative(),
+  repositoryId: z.string().min(1),
   baseSha: z.string().min(1),
   headSha: z.string().min(1),
   patchFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
@@ -32,6 +37,12 @@ export function withTrustedReviewContext(
     readonly headSha: string;
     readonly patchFingerprint?: string;
     readonly plan: string;
+    readonly repositoryCreatedAt: number;
+    readonly repositoryId: string;
+    readonly reviewFiles: readonly {
+      readonly path: string;
+      readonly status: string;
+    }[];
   },
 ): SessionAuthContext {
   return {
@@ -43,6 +54,11 @@ export function withTrustedReviewContext(
       [reviewContextAttributes.event]: values.event,
       [reviewContextAttributes.headSha]: values.headSha,
       [reviewContextAttributes.plan]: values.plan,
+      [reviewContextAttributes.repositoryCreatedAt]: String(
+        values.repositoryCreatedAt,
+      ),
+      [reviewContextAttributes.repositoryId]: values.repositoryId,
+      [reviewContextAttributes.reviewFiles]: JSON.stringify(values.reviewFiles),
       ...(values.patchFingerprint
         ? {
             [reviewContextAttributes.patchFingerprint]:
@@ -70,6 +86,9 @@ export function trustedGitHubContext(
     repo,
     pullRequest: auth.attributes.pull_request_number,
     repository,
+    repositoryCreatedAt:
+      auth.attributes[reviewContextAttributes.repositoryCreatedAt],
+    repositoryId: auth.attributes[reviewContextAttributes.repositoryId],
     baseSha: auth.attributes[reviewContextAttributes.baseSha],
     headSha: auth.attributes[reviewContextAttributes.headSha],
     patchFingerprint:

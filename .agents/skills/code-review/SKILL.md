@@ -309,7 +309,7 @@ Include:
 - actionable findings as
   `[CR-N][BLOCKING|IMPORTANT|IMPROVEMENT][CLAIM|QUALITY|ARCHITECTURE_RISK|
   DISCOVERABILITY]
-  file:line — evidence, impact, smallest remedy`;
+  file:line: evidence, impact, smallest remedy`;
 - verified claims, static-only or unreached areas, and retained probe artifacts.
 
 `BLOCKING` prevents safe shipment. `IMPORTANT` has material correctness,

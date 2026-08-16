@@ -200,7 +200,7 @@ Lead with the highest-value current conclusion. Include:
   including coalesced sources and reconciled conflicts;
 - actionable findings as
   `[CA-N][BLOCKING|IMPORTANT|IMPROVEMENT][BEHAVIOR|QUALITY|ARCHITECTURE_RISK|
-  OPERATIONS|DISCOVERABILITY] file:line — evidence, impact, smallest remedy`;
+  OPERATIONS|DISCOVERABILITY] file:line: evidence, impact, smallest remedy`;
 - grouped remediation batches ordered by risk reduction, dependency, and
   reviewability;
 - limitations and retained probe artifacts.

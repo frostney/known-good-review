@@ -12,7 +12,7 @@ import { summarizeUsage } from "../src/telemetry/usage";
 describe("GitHub-owned state and telemetry", () => {
   test("round-trips the hidden GitHub state marker", () => {
     const state = {
-      schemaVersion: 1 as const,
+      schemaVersion: 2 as const,
       app: "known-good-review" as const,
       pullRequest: 42,
       initialFullStatus: "completed" as const,

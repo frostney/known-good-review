@@ -269,7 +269,7 @@ export async function publishReview(input: {
     };
   });
   await writeReviewState(input.octokit, input.context, {
-    schemaVersion: 1,
+    schemaVersion: 2,
     app: checkName,
     pullRequest: input.context.pullRequest,
     initialFullStatus: "completed",
@@ -294,6 +294,22 @@ export async function publishFailClosedCheck(input: {
   readonly message: string;
   readonly octokit: OctokitClient;
 }): Promise<string> {
+  const listed = await input.octokit.rest.checks.listForRef({
+    owner: input.context.owner,
+    repo: input.context.repo,
+    ref: input.context.headSha,
+    check_name: checkName,
+    per_page: 100,
+  });
+  const existing = [...listed.data.check_runs]
+    .filter((check) => check.name === checkName)
+    .sort((left, right) => right.id - left.id)[0];
+  if (existing?.conclusion === "action_required") {
+    return (
+      existing.html_url ??
+      `https://github.com/${input.context.repository}/pull/${input.context.pullRequest}/checks`
+    );
+  }
   const report: ReviewReport = {
     schemaVersion: 2,
     kind: "code-review",
@@ -318,6 +334,65 @@ export async function publishFailClosedCheck(input: {
     limitations: [input.message],
   };
   const check = await upsertCheck(input.octokit, input.context, report);
+  return (
+    check.html_url ??
+    `https://github.com/${input.context.repository}/pull/${input.context.pullRequest}/checks`
+  );
+}
+
+export async function publishBudgetExhaustedCheck(input: {
+  readonly context: Omit<TrustedGitHubContext, "patchFingerprint">;
+  readonly budgetAxis: "input" | "output";
+  readonly reviewAxis: string;
+  readonly usedTokens: number;
+  readonly limit: number;
+  readonly octokit: OctokitClient;
+}): Promise<string> {
+  const listed = await input.octokit.rest.checks.listForRef({
+    owner: input.context.owner,
+    repo: input.context.repo,
+    ref: input.context.headSha,
+    check_name: checkName,
+    per_page: 100,
+  });
+  const existing = [...listed.data.check_runs]
+    .filter((check) => check.name === checkName)
+    .sort((left, right) => right.id - left.id)[0];
+  const common = {
+    owner: input.context.owner,
+    repo: input.context.repo,
+    name: checkName,
+    status: "completed" as const,
+    conclusion: "action_required" as const,
+    completed_at: new Date().toISOString(),
+    output: {
+      title: "known-good-review: review incomplete",
+      summary: [
+        "The review stopped without publishing a verdict because its Eve session budget was exhausted.",
+        "",
+        `Review axis: **${input.reviewAxis}**`,
+        `Budget axis: **${input.budgetAxis}**`,
+        `Measured usage: **${input.usedTokens.toLocaleString()} tokens**`,
+        `Configured cap: **${input.limit.toLocaleString()} tokens**`,
+        "",
+        "No partial findings were published. Rerun manually only after changing the model, scope, or configured budget.",
+      ].join("\n"),
+    },
+  };
+  const check = existing
+    ? (
+        await input.octokit.rest.checks.update({
+          ...common,
+          check_run_id: existing.id,
+        })
+      ).data
+    : (
+        await input.octokit.rest.checks.create({
+          ...common,
+          head_sha: input.context.headSha,
+          external_id: `${checkName}:${input.context.pullRequest}:${input.context.headSha}`,
+        })
+      ).data;
   return (
     check.html_url ??
     `https://github.com/${input.context.repository}/pull/${input.context.pullRequest}/checks`

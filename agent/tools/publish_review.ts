@@ -1,8 +1,17 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
+import { parseReviewConfig } from "../../src/config/review-config";
 import { githubAdapter } from "../../src/github/chat-adapter";
 import { publishReview } from "../../src/github/publication";
-import { trustedGitHubContext } from "../../src/github/trusted-context";
+import {
+  reviewContextAttributes,
+  trustedGitHubContext,
+} from "../../src/github/trusted-context";
+import {
+  enqueueReviewMemory,
+  normalizedReviewMemory,
+} from "../../src/memory/client";
+import { routingAttribute } from "../../src/models/routing";
 import { reviewReportSchema } from "../../src/review/findings";
 
 export default defineTool({
@@ -14,10 +23,32 @@ export default defineTool({
     if (!trusted.patchFingerprint) {
       throw new Error("Trusted review context is missing the effective patch identity");
     }
-    return publishReview({
+    const publication = await publishReview({
       context: trusted,
       octokit: githubAdapter(trusted.installationId).octokit,
       report,
     });
+    const attributes = ctx.session.auth.current?.attributes ?? {};
+    const rawPlan = attributes[reviewContextAttributes.plan];
+    const parsedPlan =
+      typeof rawPlan === "string"
+        ? (JSON.parse(rawPlan) as { kind?: string })
+        : null;
+    if (parsedPlan?.kind !== "full" && parsedPlan?.kind !== "delta") {
+      throw new Error("Published review is missing a trusted review kind");
+    }
+    const rawConfig = attributes[routingAttribute];
+    const config = parseReviewConfig(
+      typeof rawConfig === "string" ? rawConfig : null,
+    );
+    const memory = await enqueueReviewMemory(
+      normalizedReviewMemory({
+        config,
+        context: trusted,
+        report,
+        reviewKind: parsedPlan.kind,
+      }),
+    );
+    return { ...publication, memory };
   },
 });

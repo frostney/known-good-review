@@ -94,7 +94,10 @@ export function selectRoutedModel(input: {
   readonly model: string;
   readonly modelOptions?: {
     readonly providerOptions: {
-      readonly gateway: { readonly models: readonly string[] };
+      readonly gateway: {
+        readonly caching: "auto";
+        readonly models?: readonly string[];
+      };
     };
   };
 } {
@@ -117,13 +120,14 @@ export function selectRoutedModel(input: {
   const fallbacks = chain.slice(route.attempt + 1);
   return {
     model,
-    ...(fallbacks.length > 0
-      ? {
-          modelOptions: {
-            providerOptions: { gateway: { models: fallbacks } },
-          },
-        }
-      : {}),
+    modelOptions: {
+      providerOptions: {
+        gateway: {
+          caching: "auto" as const,
+          ...(fallbacks.length > 0 ? { models: fallbacks } : {}),
+        },
+      },
+    },
   };
 }
 

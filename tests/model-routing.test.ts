@@ -28,7 +28,10 @@ describe("dynamic Eve model routing", () => {
       model: "openai/gpt-5.6-sol",
       modelOptions: {
         providerOptions: {
-          gateway: { models: ["anthropic/claude-opus-5"] },
+          gateway: {
+            caching: "auto",
+            models: ["anthropic/claude-opus-5"],
+          },
         },
       },
     });
@@ -50,7 +53,12 @@ describe("dynamic Eve model routing", () => {
     ).toEqual({
       model: "moonshotai/kimi-k3",
       modelOptions: {
-        providerOptions: { gateway: { models: ["openai/gpt-5.6-sol"] } },
+        providerOptions: {
+          gateway: {
+            caching: "auto",
+            models: ["openai/gpt-5.6-sol"],
+          },
+        },
       },
     });
   });
@@ -68,7 +76,12 @@ describe("dynamic Eve model routing", () => {
           }),
         ),
       }),
-    ).toEqual({ model: "openai/gpt-5.6-sol" });
+    ).toEqual({
+      model: "openai/gpt-5.6-sol",
+      modelOptions: {
+        providerOptions: { gateway: { caching: "auto" } },
+      },
+    });
     expect(() =>
       selectRoutedModel({
         attributes: { [routingAttribute]: config },

@@ -1,18 +1,7 @@
 ---
-name: code-review
-description: >-
-  Reviews a pull request, branch, or worktree against its claim, repository
-  standards, reproducible behavior, and churn-backed architectural risks. It
-  can delegate evidence gathering by review axis, limit findings to exact
-  files, revalidate prior review or audit JSON, and optionally fix selected
-  findings or all in-scope findings. Use when the user runs /code-review or asks
-  for an evidence-backed review of a bounded change.
-license: Unlicense OR MIT
-compatibility: >-
-  Requires git, the project's declared build and test tools, and network access
-  when pull-request context or current third-party documentation is relevant.
+description: "Reviews a pull request, branch, or worktree against its claim, repository standards, reproducible behavior, and churn-backed architectural risks. It can delegate evidence gathering by review axis, limit findings to exact files, revalidate prior review or audit JSON, and optionally fix selected findings or all in-scope findings. Use when the user runs /code-review or asks for an evidence-backed review of a bounded change."
+license: "Unlicense OR MIT"
 ---
-
 # Code review
 
 Establish whether the requested review scope is correct, necessary, clear, and
@@ -309,7 +298,7 @@ Include:
 - actionable findings as
   `[CR-N][BLOCKING|IMPORTANT|IMPROVEMENT][CLAIM|QUALITY|ARCHITECTURE_RISK|
   DISCOVERABILITY]
-  file:line — evidence, impact, smallest remedy`;
+  file:line: evidence, impact, smallest remedy`;
 - verified claims, static-only or unreached areas, and retained probe artifacts.
 
 `BLOCKING` prevents safe shipment. `IMPORTANT` has material correctness,

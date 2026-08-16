@@ -4,7 +4,7 @@ import { reviewReportSchema } from "../review/findings";
 const stateMarker = "known-good-review:state";
 
 export const reviewStateSchema = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
   app: z.literal("known-good-review"),
   pullRequest: z.number().int().positive(),
   initialFullStatus: z.enum([
@@ -59,7 +59,7 @@ export function pendingReviewState(input: {
   readonly status: "debouncing" | "running" | "failed";
 }): ReviewState {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     app: "known-good-review",
     pullRequest: input.pullRequest,
     initialFullStatus: input.status,

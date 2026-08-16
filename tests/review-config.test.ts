@@ -1,15 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import {
-  defaultModel,
+  defaultEmbedding,
+  defaultModels,
   modelsForAxis,
   parseReviewConfig,
 } from "../src/config/review-config";
 
 describe("trusted review configuration", () => {
-  test("defaults every invocation to Sol", () => {
+  test("defaults every invocation to the configured Gateway fallback chain", () => {
     const config = parseReviewConfig(null);
-    expect(config.model).toEqual([defaultModel]);
-    expect(modelsForAxis(config, "deduplication")).toEqual([defaultModel]);
+    expect(config.model).toEqual(defaultModels);
+    expect(config.embedding).toEqual(defaultEmbedding);
+    expect(modelsForAxis(config, "deduplication")).toEqual(defaultModels);
   });
 
   test("supports ordered fallbacks and per-axis overrides", () => {
@@ -43,10 +45,24 @@ agents: moonshotai/kimi-k3, openai/gpt-5.6-sol
     ]);
   });
 
-  test("fails closed for unknown keys, models, and duplicate fallbacks", () => {
+  test("accepts arbitrary Gateway model IDs and explicit embedding dimensions", () => {
+    const config = parseReviewConfig(`
+model: xai/grok-code-fast-1
+embedding: openai/text-embedding-3-large
+embeddingDimension: 3072
+`);
+    expect(config.model).toEqual(["xai/grok-code-fast-1"]);
+    expect(config.embedding).toEqual({
+      model: "openai/text-embedding-3-large",
+      dimension: 3072,
+    });
+  });
+
+  test("fails closed for unknown keys, malformed IDs, dimensions, and duplicate fallbacks", () => {
     expect(() => parseReviewConfig("version: 1")).toThrow("Invalid");
-    expect(() => parseReviewConfig("model: openai/gpt-4o")).toThrow(
-      "unknown model",
+    expect(() => parseReviewConfig("model: gpt-5")).toThrow("creator/model");
+    expect(() => parseReviewConfig("embeddingDimension: 1000")).toThrow(
+      "dimension must be one of",
     );
     expect(() =>
       parseReviewConfig(

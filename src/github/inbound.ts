@@ -131,9 +131,13 @@ export function planDispatch(input: {
     baseline,
     draft: input.draft,
     head: input.head,
-    manualFull: input.manualFull,
-    manualFullAuthorized: input.manualFullAuthorized,
-    patchFingerprint,
+    ...(input.manualFull === undefined
+      ? {}
+      : { manualFull: input.manualFull }),
+    ...(input.manualFullAuthorized === undefined
+      ? {}
+      : { manualFullAuthorized: input.manualFullAuthorized }),
+    ...(patchFingerprint === undefined ? {} : { patchFingerprint }),
   });
   const priorBaseline =
     input.state.kind === "valid" ? input.state.state.baseline : null;
@@ -146,7 +150,7 @@ export function planDispatch(input: {
       : [];
   return {
     changedFiles,
-    patchFingerprint,
+    ...(patchFingerprint === undefined ? {} : { patchFingerprint }),
     plan,
     priorReport: priorBaseline?.report ?? null,
   };
