@@ -60,5 +60,7 @@ completed scaffold as a pull request.
 
 ## Open work
 
-- Observe exact-head CI and review state on the known-good-review pull request.
+- known-good-review PR #1 is open and ready for review:
+  `https://github.com/frostney/known-good-review/pull/1`. The repository has no
+  remote checks configured; the local completion gate passed before opening it.
 - External GitHub/Vercel setup remains unauthorized and undone.
