@@ -15,6 +15,7 @@ export { findingBody } from "./review-presentation";
 
 export const checkName = "known-good-review";
 const findingMarkerPrefix = "known-good-review:finding:";
+const inlineCommentApiVersion = "2026-03-10";
 
 type OctokitClient = Octokit;
 
@@ -148,7 +149,7 @@ export async function publishInProgressCheck(input: {
       summary: `A ${input.reviewKind} review was accepted and is currently running.`,
     },
   };
-  const check = existing
+  const check = existing && existing.status !== "completed"
     ? (
         await input.octokit.rest.checks.update({
           ...common,
@@ -301,21 +302,25 @@ async function reconcileFindingComments(
           body: retiredFindingBody(finding.id),
         });
       }
-      await octokit.rest.pulls.createReviewComment({
-        owner: context.owner,
-        repo: context.repo,
-        pull_number: context.pullRequest,
-        commit_id: context.headSha,
-        path: finding.location.path,
-        body,
-        ...(location.subjectType === "line"
-          ? {
-              line: location.line,
-              side: location.side,
-              subject_type: "line" as const,
-            }
-          : { subject_type: "file" as const }),
-      });
+      await octokit.request(
+        "POST /repos/{owner}/{repo}/pulls/{pull_number}/comments",
+        {
+          owner: context.owner,
+          repo: context.repo,
+          pull_number: context.pullRequest,
+          commit_id: context.headSha,
+          path: finding.location.path,
+          body,
+          ...(location.subjectType === "line"
+            ? {
+                line: location.line,
+                side: location.side,
+                subject_type: "line" as const,
+              }
+            : { subject_type: "file" as const }),
+          headers: { "x-github-api-version": inlineCommentApiVersion },
+        },
+      );
     }
   }
 
