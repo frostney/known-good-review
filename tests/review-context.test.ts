@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { z } from "zod";
+import { readReviewEvidenceInputSchema } from "../agent/tools/read_review_evidence";
+import { reviewLaneCheckpointInputSchema } from "../agent/tools/review_lane_checkpoint";
 import {
   readReviewEvidenceManifest,
   readNextReviewEvidencePacket,
@@ -60,6 +63,32 @@ function memorySandbox() {
 }
 
 describe("review evidence bundle", () => {
+  test("exposes provider-compatible object schemas for variant tools", () => {
+    expect(z.toJSONSchema(readReviewEvidenceInputSchema)).toHaveProperty(
+      "type",
+      "object",
+    );
+    expect(z.toJSONSchema(reviewLaneCheckpointInputSchema)).toHaveProperty(
+      "type",
+      "object",
+    );
+    expect(
+      readReviewEvidenceInputSchema.safeParse({ operation: "patch" }).success,
+    ).toBeFalse();
+    expect(
+      readReviewEvidenceInputSchema.safeParse({
+        operation: "packet",
+        axis: "engineering-quality",
+      }).success,
+    ).toBeTrue();
+    expect(
+      reviewLaneCheckpointInputSchema.safeParse({
+        operation: "write",
+        axis: "engineering-quality",
+      }).success,
+    ).toBeFalse();
+  });
+
   test("stores one content-addressed patch and returns bounded pages", async () => {
     const sandbox = memorySandbox();
     const patch = "@@ -1 +1 @@\n-old\n+new\n".repeat(1_000);
