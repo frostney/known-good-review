@@ -1,8 +1,13 @@
 const manualFullPattern =
   /(?:@known-good-review|\/known-good-review)\s+(?:run\s+)?full\s+review\b/i;
+const botMentionPattern = /@known-good-review(?=$|[^A-Za-z0-9_-])/i;
 
 export function requestsManualFullReview(body: string): boolean {
   return manualFullPattern.test(body);
+}
+
+export function addressesKnownGoodReview(body: string): boolean {
+  return botMentionPattern.test(body);
 }
 
 export function canRequestManualFull(permission: string): boolean {
