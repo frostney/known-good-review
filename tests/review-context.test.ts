@@ -24,6 +24,8 @@ import {
   writeLaneCheckpoint,
 } from "../src/review/lane-checkpoint";
 import {
+  coordinatorReviewSteps,
+  coordinatorReviewWindowClosed,
   reviewLaneProbeSteps,
   reviewLaneProbeWindowClosed,
 } from "../src/review/probe-window";
@@ -316,6 +318,30 @@ describe("review lane checkpoint", () => {
       reviewLaneProbeWindowClosed({
         channelKind: "github",
         stepIndex: reviewLaneProbeSteps,
+      }),
+    ).toBe(false);
+  });
+
+  test("moves a fresh review coordinator into checkpoint and publish mode", () => {
+    expect(
+      coordinatorReviewWindowClosed({
+        channelKind: "github",
+        reviewKind: "full",
+        stepIndex: coordinatorReviewSteps - 1,
+      }),
+    ).toBe(false);
+    expect(
+      coordinatorReviewWindowClosed({
+        channelKind: "github",
+        reviewKind: "delta",
+        stepIndex: coordinatorReviewSteps,
+      }),
+    ).toBe(true);
+    expect(
+      coordinatorReviewWindowClosed({
+        channelKind: "subagent",
+        reviewKind: "full",
+        stepIndex: coordinatorReviewSteps,
       }),
     ).toBe(false);
   });

@@ -39,6 +39,7 @@ import { requestMemoryDeletion } from "../../src/memory/client";
 import { findingsToRevalidate } from "../../src/review/revalidation";
 import { discoverabilityApplies } from "../../src/review/discoverability";
 import { effectivePatchFingerprint } from "../../src/review/effective-patch";
+import { withFreshReviewSessions } from "../../src/github/session-routing";
 
 const supportedActions = new Set([
   "closed",
@@ -642,7 +643,11 @@ export default {
                   retainedRepositoryIds: [...retainedRepositoryIds],
                 }),
               listAccessibleRepositories: listAccessibleRepositoryIds,
-            })) ?? githubRoute.handler(request, context),
+            })) ??
+            githubRoute.handler(request, {
+              ...context,
+              from: withFreshReviewSessions(context.from),
+            }),
         }
       : route,
   ),
