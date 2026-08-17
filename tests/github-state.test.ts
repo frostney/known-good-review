@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import type { ChannelFrom, Session } from "eve/channels";
+import type { SessionAuthContext } from "eve/context";
 import {
   decodeReviewState,
   encodeReviewState,
@@ -12,6 +14,26 @@ import {
   reviewControlResponse,
 } from "../src/github/manual-full";
 import { summarizeUsage } from "../src/telemetry/usage";
+import {
+  startsFreshReviewSession,
+  withFreshReviewSessions,
+} from "../src/github/session-routing";
+import { reviewContextAttributes } from "../src/github/trusted-context";
+
+function reviewAuth(
+  kind: "delta" | "full",
+  event = "synchronize",
+): SessionAuthContext {
+  return {
+    attributes: {
+      [reviewContextAttributes.event]: event,
+      [reviewContextAttributes.plan]: JSON.stringify({ kind }),
+    },
+    authenticator: "github",
+    principalId: "frostney",
+    principalType: "user",
+  };
+}
 
 describe("GitHub-owned state and telemetry", () => {
   test("round-trips state behind a visible GitHub result", () => {
@@ -96,6 +118,42 @@ describe("GitHub-owned state and telemetry", () => {
     );
     expect(reviewControlResponse("@known-good-review Stop")).toBe("stop");
     expect(reviewControlResponse("@known-good-review review this")).toBeNull();
+  });
+
+  test("starts each review in a fresh PR session but preserves approvals", async () => {
+    expect(startsFreshReviewSession(reviewAuth("full"))).toBeTrue();
+    expect(startsFreshReviewSession(reviewAuth("delta"))).toBeTrue();
+    expect(
+      startsFreshReviewSession(
+        reviewAuth("full", "review-control-response"),
+      ),
+    ).toBeFalse();
+
+    const events: string[] = [];
+    const from = (() => ({
+      reset: async () => {
+        events.push("reset");
+        return {
+          previousSessionId: "old-session",
+          status: "reset" as const,
+        };
+      },
+      send: async () => {
+        events.push("send");
+        return {} as Session;
+      },
+    })) as unknown as ChannelFrom;
+    const routed = withFreshReviewSessions(from);
+    await routed("repo:1:pull:53").send("review", {
+      auth: reviewAuth("full"),
+    });
+    expect(events).toEqual(["reset", "send"]);
+
+    events.length = 0;
+    await routed("repo:1:pull:53").send("Approve", {
+      auth: reviewAuth("full", "review-control-response"),
+    });
+    expect(events).toEqual(["send"]);
   });
 
   test("acknowledges the exact manual trigger without blocking the review", async () => {

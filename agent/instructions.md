@@ -115,7 +115,11 @@ the skill's worker return contract and lives only in the checkpoint.
 Loop only on an explicit `incomplete` result; Eve already retries supported
 transient failures, and a terminal child failure must fail closed instead of
 restarting uncheckpointed work. After Workflow reports every axis complete, the
-coordinator reads each exact checkpoint and reconciles its `completedReport`.
+coordinator reads every exact checkpoint in one parallel tool-call batch,
+reconciles their `completedReport` values, and makes its next model action the
+single `publish_review` call. It performs no additional repository inspection
+or probes after Workflow returns. At coordinator step twelve the application
+withdraws every capability except checkpoint reads and publication.
 Workflow exhaustion, a lane without a valid checkpoint, or a complete receipt
 without a complete checkpoint is incomplete evidence and must fail closed;
 never publish a partial verdict.
