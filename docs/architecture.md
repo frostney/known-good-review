@@ -16,7 +16,7 @@ flowchart LR
   ER --> CM["Convex RAG memory"]
   MD --> CM
   ER --> CS["Chat SDK GitHub adapter"]
-  CS --> CR["One Check Run and stable finding comments"]
+  CS --> CR["One Check Run, result summary, and inline findings"]
   CR --> GH
 ```
 
@@ -115,12 +115,17 @@ application record behind the in-flight-ingestion barrier.
 
 ## State and publication
 
-Every successful Check publication also updates a hidden PR comment containing
-the canonical state schema v2 and code-review v2 artifact, baseline head,
-whole-patch fingerprint, and per-file fingerprints. Finding comments use stable `CR-N` markers and are
-updated in place; findings absent from the current canonical result are marked
-inactive. Check lookup is scoped to the current head and the fixed name
-`known-good-review`.
+An accepted model-backed review immediately creates or updates the current-head
+Check Run as `in_progress`. Manual comment triggers receive Eve's native eyes
+reaction. Completion moves the same Check Run to its final verdict.
+
+Every successful publication also updates one visible PR summary containing the
+result and a hidden canonical state schema v2 artifact, baseline head,
+whole-patch fingerprint, and per-file fingerprints. Findings use native inline
+review threads at their exact diff locations. Stable hidden `CR-N` markers own
+reconciliation without exposing internal IDs. Findings absent from the current
+canonical result are marked inactive. Check lookup is scoped to the current
+head and the fixed name `known-good-review`.
 
 The state artifact is size-bounded to GitHub's comment limit. Oversize or
 invalid output fails before advancing the baseline. A completed or failed Eve

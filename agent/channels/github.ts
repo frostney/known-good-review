@@ -23,6 +23,7 @@ import {
 } from "../../src/github/manual-full";
 import {
   publishFailClosedCheck,
+  publishInProgressCheck,
   publishReview,
   writeReviewState,
 } from "../../src/github/publication";
@@ -128,11 +129,17 @@ async function fetchReviewState(
   ctx: GitHubInboundContext,
   pullRequest: number,
 ) {
-  const comments = await fetchAllPages(
-    ctx,
-    `/repos/${ctx.repository.owner}/${ctx.repository.name}/issues/${pullRequest}/comments`,
-  );
-  return reviewStateFromComments(comments);
+  const [timelineComments, reviewComments] = await Promise.all([
+    fetchAllPages(
+      ctx,
+      `/repos/${ctx.repository.owner}/${ctx.repository.name}/issues/${pullRequest}/comments`,
+    ),
+    fetchAllPages(
+      ctx,
+      `/repos/${ctx.repository.owner}/${ctx.repository.name}/pulls/${pullRequest}/comments`,
+    ),
+  ]);
+  return reviewStateFromComments([...timelineComments, ...reviewComments]);
 }
 
 async function fetchPatchFiles(
@@ -307,6 +314,15 @@ async function dispatchReview(input: {
     });
     return null;
   }
+  if (dispatch.plan.kind !== "full" && dispatch.plan.kind !== "delta") {
+    return null;
+  }
+
+  await publishInProgressCheck({
+    context,
+    octokit,
+    reviewKind: dispatch.plan.kind,
+  });
 
   if (dispatch.plan.kind === "full" && dispatch.plan.reason === "initial") {
     await writeReviewState(
@@ -432,12 +448,13 @@ const channel = githubChannel({
   botName: "known-good-review",
   credentials: githubCredentials,
   turnPolicy: "steer",
-  progress: { reactions: false },
+  progress: { reactions: true },
   onPullRequest,
   onComment,
   events: {
-    // Check Runs and finding comments are the product surface. Suppress the
-    // ordinary model reply so one turn cannot create a second review surface.
+    // Check Runs, the result summary, and inline finding threads are the
+    // product surface. Suppress the ordinary model reply so one turn cannot
+    // create a second review surface.
     "message.completed": () => {},
   },
 });

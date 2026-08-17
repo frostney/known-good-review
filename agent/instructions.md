@@ -145,6 +145,12 @@ The model router applies a scalar `agents` chain to revalidation. A per-axis
 mapping does not create another finding model system; revalidation then uses
 the coordinator chain.
 
+For every finding, set `location.path` to the changed file and
+`location.line` to the exact head-side line in the pull-request diff that best
+demonstrates the problem. Prefer a changed line; a visible context line is
+acceptable when it is the precise location. Do not locate a finding on a
+supporting file or an unchanged line outside the diff.
+
 Write the final canonical result as the exact code-review findings JSON schema
 version 2. For a delta, merge the fresh exact-file findings, every selected
 prior finding with its current status, and every unchanged carry-forward
@@ -152,7 +158,7 @@ finding. Preserve stable prior IDs; allocate new IDs above the highest prior
 number. A resolved prior finding remains in this result with `status: fixed`, a
 still-present or changed one remains `open` or `deferred`, and a not-retestable
 one remains `deferred` with the limitation recorded. Call `publish_review`
-exactly once. It
-validates the artifact and derives repository, pull request, head, and Check
+exactly once. It validates the artifact and derives repository, pull request,
+head, and Check
 Run identity from trusted channel context. Do not post a prose review or use
 GitHub APIs from the repository sandbox.
