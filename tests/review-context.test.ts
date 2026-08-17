@@ -20,6 +20,10 @@ import {
   validateLaneCheckpointEvidenceProgress,
   writeLaneCheckpoint,
 } from "../src/review/lane-checkpoint";
+import {
+  reviewLaneProbeSteps,
+  reviewLaneProbeWindowClosed,
+} from "../src/review/probe-window";
 
 const identity = {
   baseSha: "1".repeat(40),
@@ -266,6 +270,27 @@ describe("review evidence bundle", () => {
 });
 
 describe("review lane checkpoint", () => {
+  test("rolls a deep lane into checkpoint-only mode at the fixed step boundary", () => {
+    expect(
+      reviewLaneProbeWindowClosed({
+        channelKind: "subagent",
+        stepIndex: reviewLaneProbeSteps - 1,
+      }),
+    ).toBe(false);
+    expect(
+      reviewLaneProbeWindowClosed({
+        channelKind: "subagent",
+        stepIndex: reviewLaneProbeSteps,
+      }),
+    ).toBe(true);
+    expect(
+      reviewLaneProbeWindowClosed({
+        channelKind: "github",
+        stepIndex: reviewLaneProbeSteps,
+      }),
+    ).toBe(false);
+  });
+
   test("requires exact, non-overlapping finding-scope coverage", () => {
     expect(() =>
       validateLaneCheckpointCoverage(
