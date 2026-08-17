@@ -75,6 +75,9 @@ describe("review evidence bundle", () => {
       "object",
     );
     expect(
+      z.toJSONSchema(reviewLaneCheckpointInputSchema).required,
+    ).toContain("checkpoint");
+    expect(
       readReviewEvidenceInputSchema.safeParse({ operation: "patch" }).success,
     ).toBeFalse();
     expect(
@@ -86,6 +89,20 @@ describe("review evidence bundle", () => {
     expect(
       reviewLaneCheckpointInputSchema.safeParse({
         operation: "write",
+        axis: "engineering-quality",
+        checkpoint: null,
+      }).success,
+    ).toBeFalse();
+    expect(
+      reviewLaneCheckpointInputSchema.safeParse({
+        operation: "read",
+        axis: "engineering-quality",
+        checkpoint: null,
+      }).success,
+    ).toBeTrue();
+    expect(
+      reviewLaneCheckpointInputSchema.safeParse({
+        operation: "read",
         axis: "engineering-quality",
       }).success,
     ).toBeFalse();

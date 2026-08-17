@@ -21,18 +21,20 @@ export const reviewLaneCheckpointInputSchema = z
       .describe("Read the current checkpoint or replace it."),
     axis: z.enum(reviewAxes),
     checkpoint: laneCheckpointContentSchema
-      .optional()
-      .describe("Required only for a write operation."),
+      .nullable()
+      .describe(
+        "Use null for a read operation and checkpoint content for a write operation.",
+      ),
   })
   .superRefine((input, refinement) => {
-    if (input.operation === "write" && input.checkpoint === undefined) {
+    if (input.operation === "write" && input.checkpoint === null) {
       refinement.addIssue({
         code: "custom",
         path: ["checkpoint"],
         message: "Checkpoint writes require checkpoint content",
       });
     }
-    if (input.operation === "read" && input.checkpoint !== undefined) {
+    if (input.operation === "read" && input.checkpoint !== null) {
       refinement.addIssue({
         code: "custom",
         path: ["checkpoint"],
@@ -73,7 +75,7 @@ export default defineTool({
         checkpoint,
       };
     }
-    if (input.checkpoint === undefined) {
+    if (input.checkpoint === null) {
       throw new Error("Checkpoint writes require checkpoint content");
     }
     const progress = await readReviewEvidenceProgress(
