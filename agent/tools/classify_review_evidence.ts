@@ -6,6 +6,7 @@ import {
   reviewContextAttributes,
   trustedGitHubContext,
 } from "../../src/github/trusted-context";
+import { prepareReviewWorkspace } from "../../src/github/review-workspace";
 
 const reviewFilesSchema = z.array(
   z.object({
@@ -43,25 +44,10 @@ export default defineTool({
     }
     const files = reviewFilesSchema.parse(JSON.parse(rawFiles));
     const sandbox = await ctx.getSandbox();
+    await prepareReviewWorkspace(trusted, sandbox);
     const indexPath = `/tmp/known-good-review-index-${randomUUID()}`;
     const base = shellQuote(trusted.baseSha);
     const head = shellQuote(trusted.headSha);
-    for (const [revision, label] of [
-      [base, "base"],
-      [head, "head"],
-    ] as const) {
-      const present = await sandbox.run({
-        command: `cd /workspace && git cat-file -e ${revision}^{commit}`,
-      });
-      if (present.exitCode !== 0) {
-        const fetched = await sandbox.run({
-          command: `cd /workspace && GIT_TERMINAL_PROMPT=0 git fetch --depth 1 origin ${revision}`,
-        });
-        if (fetched.exitCode !== 0) {
-          throw new Error(`Could not fetch trusted ${label} revision`);
-        }
-      }
-    }
     const prepared = await sandbox.run({
       command: `cd /workspace && GIT_INDEX_FILE=${shellQuote(indexPath)} git read-tree ${base}`,
     });
