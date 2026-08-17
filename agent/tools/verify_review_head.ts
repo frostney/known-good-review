@@ -13,6 +13,11 @@ export default defineTool({
     "Revalidate that the pull request is still open, reviewable, and at the trusted base/head before inspecting or publishing it. Call this after the initial debounce and immediately before every review.",
   inputSchema: z.object({}),
   async execute(_input, ctx) {
+    if (ctx.session.parent) {
+      throw new Error(
+        "Only the review coordinator can verify the pull request head",
+      );
+    }
     const trusted = trustedGitHubContext(ctx.session.auth.current);
     const adapter = githubAdapter(trusted.installationId);
     const response = await adapter.octokit.rest.pulls.get({
