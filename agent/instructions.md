@@ -70,13 +70,13 @@ Put the axis instruction, memory lookup, tool results, and generated content
 after that prefix. The coordinator validates and reconciles every candidate and
 owns severity, IDs, and verdict.
 
-Each child starts by calling `review_lane_checkpoint` with `operation: read`
-for its axis, then calls `read_review_evidence` exactly once with operation
-`packet` and that same axis. The application, not the model, advances one
-bounded immutable-evidence packet per fresh child and records which manifest
-entries were fully delivered. Do not call the manifest or patch operations in
-a lane. A missing checkpoint starts the lane. A present in-progress checkpoint
-is a Milestone Rush-style work packet:
+Each child starts by calling `review_lane_checkpoint` with `operation: read`,
+`checkpoint: null`, and its axis, then calls `read_review_evidence` exactly once
+with operation `packet` and that same axis. The application, not the model,
+advances one bounded immutable-evidence packet per fresh child and records which
+manifest entries were fully delivered. Do not call the manifest or patch
+operations in a lane. A missing checkpoint starts the lane. A present
+in-progress checkpoint is a Milestone Rush-style work packet:
 reconcile its reviewed and remaining manifest entry indexes with the immutable
 manifest, retain only reproduced observations, and continue the remaining work
 without replaying the prior raw tool history. Never rerun a complete checkpoint.
@@ -115,7 +115,8 @@ the skill's worker return contract and lives only in the checkpoint.
 Loop only on an explicit `incomplete` result; Eve already retries supported
 transient failures, and a terminal child failure must fail closed instead of
 restarting uncheckpointed work. After Workflow reports every axis complete, the
-coordinator reads every exact checkpoint in one parallel tool-call batch,
+coordinator reads every exact checkpoint in one parallel tool-call batch using
+`operation: read` and `checkpoint: null`,
 reconciles their `completedReport` values, and makes its next model action the
 single `publish_review` call. It performs no additional repository inspection
 or probes after Workflow returns. At coordinator step twelve the application
