@@ -5,25 +5,29 @@ import {
 } from "eve/sandbox";
 import { githubOnlyNetworkPolicy } from "../src/github/review-workspace";
 
-export const sandboxRuntimeRevision = "eve-0.38.3-workspace-owner";
+export const sandboxRuntimeRevision = "eve-0.38.3-workspace-owner-alignment";
 
-export async function assertSandboxWorkspaceOwnership(
+export async function alignSandboxWorkspaceOwnership(
   sandbox: Pick<SandboxSession, "run">,
 ): Promise<void> {
   const result = await sandbox.run({
     command: [
       "set -eu",
-      'current_user="$(id -un)"',
-      'workspace_owner="$(stat -c %U /workspace)"',
-      'printf "%s:%s\\n" "$current_user" "$workspace_owner"',
-      'test "$current_user" = vercel-sandbox',
-      'test "$workspace_owner" = "$current_user"',
+      'current_uid="$(id -u)"',
+      'current_gid="$(id -g)"',
+      'workspace_uid="$(stat -c %u /workspace)"',
+      'if [ "$workspace_uid" != "$current_uid" ]; then',
+      '  sudo chown "$current_uid:$current_gid" /workspace',
+      "fi",
+      'workspace_uid="$(stat -c %u /workspace)"',
+      'printf "%s:%s\\n" "$current_uid" "$workspace_uid"',
+      'test "$workspace_uid" = "$current_uid"',
     ].join("\n"),
   });
   if (result.exitCode !== 0) {
     const observedOwnership = result.stdout.trim() || "unknown";
     throw new Error(
-      `Eve sandbox must run as vercel-sandbox and own /workspace; observed ${observedOwnership}.`,
+      `Eve sandbox command user must own /workspace; observed ${observedOwnership}.`,
     );
   }
 }
@@ -45,6 +49,6 @@ export default defineSandbox({
   }),
   revalidationKey: () => sandboxRuntimeRevision,
   async bootstrap({ use }) {
-    await assertSandboxWorkspaceOwnership(await use());
+    await alignSandboxWorkspaceOwnership(await use());
   },
 });

@@ -1,47 +1,54 @@
 import { describe, expect, test } from "bun:test";
 import reviewSandbox, {
-  assertSandboxWorkspaceOwnership,
+  alignSandboxWorkspaceOwnership,
   sandboxRuntimeRevision,
 } from "../agent/sandbox";
 
 describe("review sandbox", () => {
   test("pins the Eve workspace ownership runtime revision", () => {
-    expect(sandboxRuntimeRevision).toBe("eve-0.38.3-workspace-owner");
+    expect(sandboxRuntimeRevision).toBe(
+      "eve-0.38.3-workspace-owner-alignment",
+    );
     expect(reviewSandbox.revalidationKey?.()).toBe(sandboxRuntimeRevision);
     expect(reviewSandbox.bootstrap).toBeFunction();
   });
 
-  test("accepts the Eve runtime user owning the workspace", async () => {
+  test("aligns the workspace with Eve's command user", async () => {
     const commands: string[] = [];
-    await assertSandboxWorkspaceOwnership({
+    await alignSandboxWorkspaceOwnership({
       async run({ command }) {
         commands.push(command);
         return {
           exitCode: 0,
-          stdout: "vercel-sandbox:vercel-sandbox\n",
+          stdout: "0:0\n",
           stderr: "",
         };
       },
     });
 
     expect(commands).toHaveLength(1);
-    expect(commands[0]).toContain('test "$current_user" = vercel-sandbox');
-    expect(commands[0]).toContain('stat -c %U /workspace');
+    expect(commands[0]).toContain(
+      'sudo chown "$current_uid:$current_gid" /workspace',
+    );
+    expect(commands[0]).toContain('stat -c %u /workspace');
+    expect(commands[0]).toContain(
+      'test "$workspace_uid" = "$current_uid"',
+    );
   });
 
-  test("rejects a runtime user that does not own the workspace", async () => {
+  test("rejects ownership that remains mismatched", async () => {
     await expect(
-      assertSandboxWorkspaceOwnership({
+      alignSandboxWorkspaceOwnership({
         async run() {
           return {
             exitCode: 1,
-            stdout: "root:vercel-sandbox\n",
+            stdout: "0:1000\n",
             stderr: "",
           };
         },
       }),
     ).rejects.toThrow(
-      "Eve sandbox must run as vercel-sandbox and own /workspace; observed root:vercel-sandbox.",
+      "Eve sandbox command user must own /workspace; observed 0:1000.",
     );
   });
 });
