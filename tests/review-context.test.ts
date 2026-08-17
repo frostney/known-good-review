@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import {
   readReviewEvidenceManifest,
+  readNextReviewEvidencePacket,
+  readReviewEvidenceProgress,
   readReviewEvidencePatch,
   reviewEvidenceManifestSchema,
   resetReviewEvidence,
@@ -15,6 +17,7 @@ import {
 import {
   readLaneCheckpoint,
   validateLaneCheckpointCoverage,
+  validateLaneCheckpointEvidenceProgress,
   writeLaneCheckpoint,
 } from "../src/review/lane-checkpoint";
 
@@ -200,6 +203,66 @@ describe("review evidence bundle", () => {
     expect(first.content.endsWith("😀")).toBe(true);
     expect(`${first.content}${second.content}`).toBe(patch);
   });
+
+  test("advances one bounded idempotent evidence packet per fresh session", async () => {
+    const sandbox = memorySandbox();
+    const patch = "x".repeat(600_000);
+    const included = await writeIncludedReviewEvidence(sandbox.runtime, {
+      patchFingerprint: identity.patchFingerprint,
+      path: "src/large.ts",
+      patch,
+      patchTokens: 150_000,
+      status: "modified",
+    });
+    await writeReviewEvidenceManifest(sandbox.runtime, {
+      schemaVersion: 1,
+      ...identity,
+      entries: [included],
+    });
+    const manifest = await readReviewEvidenceManifest(
+      sandbox.runtime,
+      identity,
+    );
+
+    const first = await readNextReviewEvidencePacket(
+      sandbox.runtime,
+      manifest,
+      "engineering-quality",
+      "session-one",
+    );
+    expect(first.entries).toHaveLength(1);
+    expect(first.entries[0]?.content).toHaveLength(500_000);
+    expect(first.completedEntries).toEqual([]);
+    expect(first.nextCursor).toEqual({
+      entryIndex: 0,
+      characterOffset: 500_000,
+    });
+    expect(
+      await readNextReviewEvidencePacket(
+        sandbox.runtime,
+        manifest,
+        "engineering-quality",
+        "session-one",
+      ),
+    ).toEqual(first);
+
+    const second = await readNextReviewEvidencePacket(
+      sandbox.runtime,
+      manifest,
+      "engineering-quality",
+      "session-two",
+    );
+    expect(second.entries[0]?.content).toHaveLength(100_000);
+    expect(second.completedEntries).toEqual([0]);
+    expect(second.nextCursor).toBeNull();
+    expect(
+      await readReviewEvidenceProgress(
+        sandbox.runtime,
+        manifest,
+        "engineering-quality",
+      ),
+    ).toEqual({ cursor: null, completedEntries: [0] });
+  });
 });
 
 describe("review lane checkpoint", () => {
@@ -231,6 +294,42 @@ describe("review lane checkpoint", () => {
         2,
       ),
     ).toThrow("must match the exact review scope");
+  });
+
+  test("binds checkpoints to application-recorded packet coverage", () => {
+    expect(() =>
+      validateLaneCheckpointEvidenceProgress(
+        {
+          status: "in-progress",
+          reviewedEntries: [0],
+          remainingEntries: [1],
+          observations: [],
+          nextSteps: [],
+          limitations: [],
+        },
+        {
+          completedEntries: [],
+          cursor: { entryIndex: 0, characterOffset: 500_000 },
+        },
+      ),
+    ).toThrow("application-recorded evidence coverage");
+    expect(() =>
+      validateLaneCheckpointEvidenceProgress(
+        {
+          status: "complete",
+          reviewedEntries: [0],
+          remainingEntries: [],
+          observations: [],
+          nextSteps: [],
+          limitations: [],
+          completedReport: "Complete.",
+        },
+        {
+          completedEntries: [0],
+          cursor: { entryIndex: 1, characterOffset: 0 },
+        },
+      ),
+    ).toThrow("before its immutable evidence packets are exhausted");
   });
 
   test("persists compact progress for a fresh lane continuation", async () => {

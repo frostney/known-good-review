@@ -71,22 +71,32 @@ after that prefix. The coordinator validates and reconciles every candidate and
 owns severity, IDs, and verdict.
 
 Each child starts by calling `review_lane_checkpoint` with `operation: read`
-for its axis, then pages the evidence manifest. A missing checkpoint starts the
-lane. A present in-progress checkpoint is a Milestone Rush-style work packet:
+for its axis, then calls `read_review_evidence` exactly once with operation
+`packet` and that same axis. The application, not the model, advances one
+bounded immutable-evidence packet per fresh child and records which manifest
+entries were fully delivered. Do not call the manifest or patch operations in
+a lane. A missing checkpoint starts the lane. A present in-progress checkpoint
+is a Milestone Rush-style work packet:
 reconcile its reviewed and remaining manifest entry indexes with the immutable
 manifest, retain only reproduced observations, and continue the remaining work
 without replaying the prior raw tool history. Never rerun a complete checkpoint.
 
 Every child calls `review_lane_checkpoint` with `operation: write` exactly once
-before returning. A complete lane records full path coverage, leaves the
-checkpoint observations, next steps, and limitations arrays empty, and returns
+after reviewing its one packet and any directly related source, history, test,
+or probe evidence, then returns immediately. Its `reviewedEntries` must equal
+the application-recorded completed entries returned by the packet; its
+`remainingEntries` are the exact complement. A complete lane records full path
+coverage, leaves the checkpoint observations, next steps, and limitations
+arrays empty, and returns
 `status: complete`, storing the skill's worker report and all terminal details
 in `completedReport`. A child that reads a complete checkpoint returns complete
 status without repeating the lane. A lane that has made useful progress
-but needs a fresh context records reviewed entries, remaining entries,
+with another evidence packet records reviewed entries, remaining entries,
 evidence-backed observations, next steps, and limitations, then returns
 `status: incomplete`.
-It must not lower its coverage standard to finish in the current context.
+It must not lower its coverage standard to finish in the current context. The
+checkpoint write rejects skipped packet coverage and rejects completion while
+another packet remains.
 
 In the same Workflow program, start a fresh built-in `agent` call for an
 incomplete lane, increment `attempt`, and pass the same byte-stable review

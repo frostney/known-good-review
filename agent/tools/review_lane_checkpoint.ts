@@ -6,9 +6,13 @@ import {
   laneCheckpointContentSchema,
   readLaneCheckpoint,
   validateLaneCheckpointCoverage,
+  validateLaneCheckpointEvidenceProgress,
   writeLaneCheckpoint,
 } from "../../src/review/lane-checkpoint";
-import { readReviewEvidenceManifest } from "../../src/review/evidence-bundle";
+import {
+  readReviewEvidenceManifest,
+  readReviewEvidenceProgress,
+} from "../../src/review/evidence-bundle";
 
 const inputSchema = z.discriminatedUnion("operation", [
   z.object({
@@ -54,6 +58,12 @@ export default defineTool({
         checkpoint,
       };
     }
+    const progress = await readReviewEvidenceProgress(
+      sandbox,
+      manifest,
+      input.axis,
+    );
+    validateLaneCheckpointEvidenceProgress(input.checkpoint, progress);
     return {
       operation: "write" as const,
       checkpoint: await writeLaneCheckpoint(

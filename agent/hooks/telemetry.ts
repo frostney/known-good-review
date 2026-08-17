@@ -19,6 +19,7 @@ import {
   type ReviewRoute,
 } from "../../src/models/routing";
 import { shadowInputExceedances } from "../../src/telemetry/budget-policy";
+import { ownsReviewLifecycle } from "../../src/review/execution-session";
 import { z } from "zod";
 
 const stepRoutes = new Map<
@@ -48,6 +49,16 @@ function stepKey(
 
 function turnKey(session: string, turnId: string): string {
   return `${session}:${turnId}`;
+}
+
+function isLifecycleOwner(ctx: {
+  readonly channel: { readonly kind?: string };
+  readonly session: { readonly parent?: unknown };
+}): boolean {
+  return ownsReviewLifecycle({
+    channelKind: ctx.channel.kind,
+    hasParent: ctx.session.parent !== undefined,
+  });
 }
 
 function executionRoute(
@@ -255,6 +266,11 @@ export default defineHook({
     },
     async "turn.failed"(event, ctx) {
       logTurnUsage(ctx.session.id, event.data.turnId);
+      if (!isLifecycleOwner(ctx)) {
+        publishedTurns.delete(`${ctx.session.id}:${event.data.turnId}`);
+        sessionRoutes.delete(ctx.session.id);
+        return;
+      }
       const attributes = ctx.session.auth.current?.attributes ?? {};
       const plan = parsedPlan(attributes);
       const route = executionRoute(ctx.channel.kind, ctx.session.id);
@@ -311,13 +327,15 @@ export default defineHook({
           }),
         );
       }
-      if (ctx.channel.kind === "subagent") {
-        sessionRoutes.delete(ctx.session.id);
-      }
     },
     async "turn.completed"(event, ctx) {
       logTurnUsage(ctx.session.id, event.data.turnId);
       const key = `${ctx.session.id}:${event.data.turnId}`;
+      if (!isLifecycleOwner(ctx)) {
+        publishedTurns.delete(key);
+        sessionRoutes.delete(ctx.session.id);
+        return;
+      }
       const attributes = ctx.session.auth.current?.attributes ?? {};
       const plan = parsedPlan(attributes);
       if (
@@ -362,11 +380,12 @@ export default defineHook({
           }),
         );
       }
-      if (ctx.channel.kind === "subagent") {
-        sessionRoutes.delete(ctx.session.id);
-      }
     },
     async "turn.cancelled"(_event, ctx) {
+      if (!isLifecycleOwner(ctx)) {
+        sessionRoutes.delete(ctx.session.id);
+        return;
+      }
       try {
         await (await ctx.getSandbox()).stop();
       } catch (error) {
@@ -376,9 +395,6 @@ export default defineHook({
             error: error instanceof Error ? error.name : "unknown",
           }),
         );
-      }
-      if (ctx.channel.kind === "subagent") {
-        sessionRoutes.delete(ctx.session.id);
       }
     },
   },
