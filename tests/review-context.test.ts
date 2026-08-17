@@ -18,6 +18,7 @@ import {
   type ReviewEvidenceManifest,
 } from "../src/review/evidence-bundle";
 import {
+  laneCheckpointContentSchema,
   readLaneCheckpoint,
   validateLaneCheckpointCoverage,
   validateLaneCheckpointEvidenceProgress,
@@ -77,13 +78,24 @@ describe("review evidence bundle", () => {
     expect(
       z.toJSONSchema(reviewLaneCheckpointInputSchema).required,
     ).toContain("checkpoint");
+    expect(z.toJSONSchema(readReviewEvidenceInputSchema).required).toEqual([
+      "operation",
+      "path",
+      "axis",
+      "cursor",
+    ]);
+    expect(z.toJSONSchema(laneCheckpointContentSchema).required).toContain(
+      "completedReport",
+    );
     expect(
       readReviewEvidenceInputSchema.safeParse({ operation: "patch" }).success,
     ).toBeFalse();
     expect(
       readReviewEvidenceInputSchema.safeParse({
         operation: "packet",
+        path: null,
         axis: "engineering-quality",
+        cursor: null,
       }).success,
     ).toBeTrue();
     expect(
@@ -373,6 +385,7 @@ describe("review lane checkpoint", () => {
           observations: [],
           nextSteps: [],
           limitations: [],
+          completedReport: null,
         },
         1,
       ),
@@ -403,6 +416,7 @@ describe("review lane checkpoint", () => {
           observations: [],
           nextSteps: [],
           limitations: [],
+          completedReport: null,
         },
         {
           completedEntries: [],
@@ -448,6 +462,7 @@ describe("review lane checkpoint", () => {
         ],
         nextSteps: ["Inspect the caller in src/b.ts."],
         limitations: [],
+        completedReport: null,
       },
       2,
     );
@@ -489,6 +504,7 @@ describe("review lane checkpoint", () => {
           observations: [],
           nextSteps: ["Start over."],
           limitations: [],
+          completedReport: null,
         },
         2,
       ),

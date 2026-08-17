@@ -72,7 +72,8 @@ owns severity, IDs, and verdict.
 
 Each child starts by calling `review_lane_checkpoint` with `operation: read`,
 `checkpoint: null`, and its axis, then calls `read_review_evidence` exactly once
-with operation `packet` and that same axis. The application, not the model,
+with operation `packet`, `path: null`, `cursor: null`, and that same axis. The
+application, not the model,
 advances one bounded immutable-evidence packet per fresh child and records which
 manifest entries were fully delivered. Do not call the manifest or patch
 operations in a lane. A missing checkpoint starts the lane. A present
@@ -89,7 +90,8 @@ the application-recorded completed entries returned by the packet; its
 coverage, leaves the checkpoint observations, next steps, and limitations
 arrays empty, and returns
 `status: complete`, storing the skill's worker report and all terminal details
-in `completedReport`. A child that reads a complete checkpoint returns complete
+in `completedReport`. An in-progress checkpoint uses `completedReport: null`.
+A child that reads a complete checkpoint returns complete
 status without repeating the lane. A lane that has made useful progress
 with another evidence packet records reviewed entries, remaining entries,
 evidence-backed observations, next steps, and limitations, then returns

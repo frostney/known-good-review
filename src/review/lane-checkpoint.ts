@@ -26,7 +26,7 @@ export const laneCheckpointContentSchema = z
         (report) => Buffer.byteLength(report, "utf8") <= 24_000,
         "A completed lane report must not exceed 24,000 UTF-8 bytes",
       )
-      .optional(),
+      .nullable(),
   })
   .superRefine((checkpoint, ctx) => {
     if (checkpoint.status === "complete" && !checkpoint.completedReport) {
@@ -49,7 +49,10 @@ export const laneCheckpointContentSchema = z
           "A complete lane checkpoint stores observations, next steps, and limitations only in its terminal report",
       });
     }
-    if (checkpoint.status === "in-progress" && checkpoint.completedReport) {
+    if (
+      checkpoint.status === "in-progress" &&
+      checkpoint.completedReport !== null
+    ) {
       ctx.addIssue({
         code: "custom",
         path: ["completedReport"],
