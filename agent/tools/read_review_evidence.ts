@@ -17,46 +17,53 @@ export const readReviewEvidenceInputSchema = z
     path: z
       .string()
       .min(1)
-      .optional()
-      .describe("Required only for a patch operation."),
+      .nullable()
+      .describe("Use the repository path for a patch operation and null otherwise."),
     axis: z
       .enum(reviewAxes)
-      .optional()
-      .describe("Required only for a packet operation."),
+      .nullable()
+      .describe("Use the review axis for a packet operation and null otherwise."),
     cursor: z
       .number()
       .int()
       .nonnegative()
-      .optional()
-      .describe("Optional manifest or patch paging cursor."),
+      .nullable()
+      .describe("Use a manifest or patch paging cursor, or null when paging starts and for packets."),
   })
   .superRefine((input, refinement) => {
-    if (input.operation === "patch" && input.path === undefined) {
+    if (input.operation === "patch" && input.path === null) {
       refinement.addIssue({
         code: "custom",
         path: ["path"],
         message: "Patch reads require a path",
       });
     }
-    if (input.operation !== "patch" && input.path !== undefined) {
+    if (input.operation !== "patch" && input.path !== null) {
       refinement.addIssue({
         code: "custom",
         path: ["path"],
         message: "Only patch reads accept a path",
       });
     }
-    if (input.operation === "packet" && input.axis === undefined) {
+    if (input.operation === "packet" && input.axis === null) {
       refinement.addIssue({
         code: "custom",
         path: ["axis"],
         message: "Packet reads require a review axis",
       });
     }
-    if (input.operation !== "packet" && input.axis !== undefined) {
+    if (input.operation !== "packet" && input.axis !== null) {
       refinement.addIssue({
         code: "custom",
         path: ["axis"],
         message: "Only packet reads accept a review axis",
+      });
+    }
+    if (input.operation === "packet" && input.cursor !== null) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["cursor"],
+        message: "Packet reads do not accept a paging cursor",
       });
     }
   });
@@ -85,7 +92,7 @@ export default defineTool({
       };
     }
     if (input.operation === "packet") {
-      if (input.axis === undefined) {
+      if (input.axis === null) {
         throw new Error("Packet reads require a review axis");
       }
       return {
@@ -98,7 +105,7 @@ export default defineTool({
         )),
       };
     }
-    if (input.path === undefined) {
+    if (input.path === null) {
       throw new Error("Patch reads require a path");
     }
     return {
