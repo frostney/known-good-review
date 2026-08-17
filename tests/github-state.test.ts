@@ -5,6 +5,7 @@ import {
   pendingReviewState,
 } from "../src/github/review-state";
 import {
+  acknowledgeManualFullReview,
   canRequestManualFull,
   requestsManualFullReview,
 } from "../src/github/manual-full";
@@ -78,6 +79,25 @@ describe("GitHub-owned state and telemetry", () => {
     expect(canRequestManualFull("write")).toBeTrue();
     expect(canRequestManualFull("maintain")).toBeTrue();
     expect(canRequestManualFull("read")).toBeFalse();
+  });
+
+  test("acknowledges the exact manual trigger without blocking the review", async () => {
+    const reactions: string[] = [];
+    expect(
+      await acknowledgeManualFullReview({
+        react: async (reaction) => {
+          reactions.push(reaction);
+        },
+      }),
+    ).toBeTrue();
+    expect(reactions).toEqual(["eyes"]);
+    expect(
+      await acknowledgeManualFullReview({
+        react: async () => {
+          throw new Error("reaction unavailable");
+        },
+      }),
+    ).toBeFalse();
   });
 
   test("aggregates metadata-only usage and exact reported cost", () => {

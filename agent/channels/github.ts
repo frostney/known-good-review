@@ -18,6 +18,7 @@ import {
   reviewStateFromComments,
 } from "../../src/github/inbound";
 import {
+  acknowledgeManualFullReview,
   canRequestManualFull,
   requestsManualFullReview,
 } from "../../src/github/manual-full";
@@ -435,12 +436,18 @@ async function onComment(ctx: GitHubInboundContext, comment: GitHubComment) {
     );
     return null;
   }
-  return dispatchReview({
+  const dispatch = await dispatchReview({
     action: "synchronize",
     ctx,
     manualFull: true,
     manualFullAuthorized: true,
   });
+  if (dispatch && !(await acknowledgeManualFullReview(ctx.thread))) {
+    console.warn(
+      "known-good-review could not acknowledge the manual review comment",
+    );
+  }
+  return dispatch;
 }
 
 const githubCredentials = connectGitHubCredentials(githubConnector);
@@ -448,7 +455,7 @@ const channel = githubChannel({
   botName: "known-good-review",
   credentials: githubCredentials,
   turnPolicy: "steer",
-  progress: { reactions: true },
+  progress: { reactions: false },
   onPullRequest,
   onComment,
   events: {

@@ -79,6 +79,62 @@ function report(): ReviewReport {
 }
 
 describe("GitHub publication lifecycle", () => {
+  test("creates a fresh Check Run when the prior run is completed", async () => {
+    const requests: CapturedRequest[] = [];
+    const octokit = new Octokit({
+      auth: "test-token",
+      request: {
+        fetch: async (resource: Request | string | URL, init?: RequestInit) => {
+          const url = new URL(String(resource));
+          const method = init?.method ?? "GET";
+          const body =
+            typeof init?.body === "string" ? JSON.parse(init.body) : null;
+          requests.push({ body, method, path: url.pathname });
+          if (method === "GET" && url.pathname.endsWith("/check-runs")) {
+            return json({
+              check_runs: [
+                {
+                  conclusion: "failure",
+                  id: 91,
+                  name: "known-good-review",
+                  status: "completed",
+                },
+              ],
+              total_count: 1,
+            });
+          }
+          if (method === "POST" && url.pathname.endsWith("/check-runs")) {
+            return json({
+              id: 92,
+              name: "known-good-review",
+              html_url: "https://github.com/acme/widget/runs/92",
+            });
+          }
+          throw new Error(`Unexpected GitHub request: ${method} ${url.pathname}`);
+        },
+      },
+    });
+
+    await publishInProgressCheck({
+      context: context(),
+      octokit,
+      reviewKind: "full",
+    });
+
+    expect(
+      requests.find(
+        (request) =>
+          request.method === "POST" && request.path.endsWith("/check-runs"),
+      )?.body,
+    ).toMatchObject({ head_sha: "head", status: "in_progress" });
+    expect(
+      requests.some(
+        (request) =>
+          request.method === "PATCH" && request.path.endsWith("/check-runs/91"),
+      ),
+    ).toBeFalse();
+  });
+
   test("moves one Check Run from in progress to a visible inline result", async () => {
     const requests: CapturedRequest[] = [];
     let checkExists = false;

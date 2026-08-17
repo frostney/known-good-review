@@ -148,7 +148,7 @@ export async function publishInProgressCheck(input: {
       summary: `A ${input.reviewKind} review was accepted and is currently running.`,
     },
   };
-  const check = existing
+  const check = existing && existing.status !== "completed"
     ? (
         await input.octokit.rest.checks.update({
           ...common,

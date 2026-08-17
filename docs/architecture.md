@@ -115,9 +115,11 @@ application record behind the in-flight-ingestion barrier.
 
 ## State and publication
 
-An accepted model-backed review immediately creates or updates the current-head
-Check Run as `in_progress`. Manual comment triggers receive Eve's native eyes
-reaction. Completion moves the same Check Run to its final verdict.
+An accepted model-backed review creates or updates an active current-head Check
+Run as `in_progress`. A rerun after completion creates a fresh same-name Check
+Run because a completed run is terminal. Manual comment triggers receive an
+eyes reaction from the webhook handler while it still owns the exact triggering
+comment. Completion moves the active Check Run to its final verdict.
 
 Every successful publication also updates one visible PR summary containing the
 result and a hidden canonical state schema v2 artifact, baseline head,
