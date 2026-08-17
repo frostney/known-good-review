@@ -116,6 +116,11 @@ network ranges. Docker fallback is offline because it cannot broker per-domain
 credentials. GitHub checkout authentication stays in the firewall; no token is
 placed in the sandbox.
 
+Sandbox bootstrap aligns `/workspace` ownership with the user that Eve actually
+uses for commands, then verifies the result. The runtime revision key replaces
+durable sandboxes when that contract changes instead of weakening Git's
+ownership checks.
+
 Each turn stops sandbox compute. The durable filesystem is resumed for the
 next delta. A close/merge operation removes `/workspace` contents and stops the
 sandbox. The GitHub state artifact remains so review history is auditable.
