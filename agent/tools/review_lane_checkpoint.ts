@@ -14,22 +14,37 @@ import {
   readReviewEvidenceProgress,
 } from "../../src/review/evidence-bundle";
 
-const inputSchema = z.discriminatedUnion("operation", [
-  z.object({
-    operation: z.literal("read"),
+export const reviewLaneCheckpointInputSchema = z
+  .object({
+    operation: z
+      .enum(["read", "write"])
+      .describe("Read the current checkpoint or replace it."),
     axis: z.enum(reviewAxes),
-  }),
-  z.object({
-    operation: z.literal("write"),
-    axis: z.enum(reviewAxes),
-    checkpoint: laneCheckpointContentSchema,
-  }),
-]);
+    checkpoint: laneCheckpointContentSchema
+      .optional()
+      .describe("Required only for a write operation."),
+  })
+  .superRefine((input, refinement) => {
+    if (input.operation === "write" && input.checkpoint === undefined) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["checkpoint"],
+        message: "Checkpoint writes require checkpoint content",
+      });
+    }
+    if (input.operation === "read" && input.checkpoint !== undefined) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["checkpoint"],
+        message: "Checkpoint reads do not accept checkpoint content",
+      });
+    }
+  });
 
 export default defineTool({
   description:
     "Read or replace the compact checkpoint for one exact review axis. A fresh lane continuation reads this first and reconciles it with the immutable evidence manifest. Write one checkpoint before returning complete or requesting a fresh continuation. Checkpoints preserve coverage, evidence-backed observations, remaining work, and limitations without preserving raw tool history.",
-  inputSchema,
+  inputSchema: reviewLaneCheckpointInputSchema,
   async execute(input, ctx) {
     const trusted = trustedGitHubContext(ctx.session.auth.current);
     if (!trusted.patchFingerprint) {
@@ -57,6 +72,9 @@ export default defineTool({
         operation: "read" as const,
         checkpoint,
       };
+    }
+    if (input.checkpoint === undefined) {
+      throw new Error("Checkpoint writes require checkpoint content");
     }
     const progress = await readReviewEvidenceProgress(
       sandbox,

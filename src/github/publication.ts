@@ -16,6 +16,50 @@ export { findingBody } from "./review-presentation";
 export const checkName = "known-good-review";
 const findingMarkerPrefix = "known-good-review:finding:";
 
+export type ActiveReviewIdentity =
+  | { readonly kind: "delta" }
+  | { readonly kind: "full"; readonly reason: "initial" | "manual" };
+
+export function activeReviewExternalId(
+  context: Pick<TrustedGitHubContext, "baseSha" | "headSha" | "pullRequest">,
+  review: ActiveReviewIdentity,
+): string {
+  return [
+    checkName,
+    context.pullRequest,
+    context.baseSha,
+    context.headSha,
+    review.kind,
+    review.kind === "full" ? review.reason : "none",
+  ].join(":");
+}
+
+export function parseActiveReviewExternalId(
+  externalId: string | null | undefined,
+  expected: Pick<
+    TrustedGitHubContext,
+    "baseSha" | "headSha" | "pullRequest"
+  >,
+): ActiveReviewIdentity | null {
+  if (!externalId) return null;
+  const [name, pullRequest, baseSha, headSha, kind, reason, extra] =
+    externalId.split(":");
+  if (
+    extra !== undefined ||
+    name !== checkName ||
+    pullRequest !== String(expected.pullRequest) ||
+    baseSha !== expected.baseSha ||
+    headSha !== expected.headSha
+  ) {
+    return null;
+  }
+  if (kind === "delta" && reason === "none") return { kind };
+  if (kind === "full" && (reason === "initial" || reason === "manual")) {
+    return { kind, reason };
+  }
+  return null;
+}
+
 const addReviewThreadMutation = `
   mutation KnownGoodReviewAddReviewThread(
     $input: AddPullRequestReviewThreadInput!
@@ -146,18 +190,19 @@ async function upsertCheck(
 export async function publishInProgressCheck(input: {
   readonly context: Omit<TrustedGitHubContext, "patchFingerprint">;
   readonly octokit: OctokitClient;
-  readonly reviewKind: "delta" | "full";
+  readonly review: ActiveReviewIdentity;
 }): Promise<string> {
   const existing = await latestCheck(input.octokit, input.context);
   const common = {
     owner: input.context.owner,
     repo: input.context.repo,
     name: checkName,
+    external_id: activeReviewExternalId(input.context, input.review),
     status: "in_progress" as const,
     started_at: new Date().toISOString(),
     output: {
       title: "known-good-review: review in progress",
-      summary: `A ${input.reviewKind} review was accepted and is currently running.`,
+      summary: `A ${input.review.kind} review was accepted and is currently running.`,
     },
   };
   const check = existing && existing.status !== "completed"
@@ -171,7 +216,6 @@ export async function publishInProgressCheck(input: {
         await input.octokit.rest.checks.create({
           ...common,
           head_sha: input.context.headSha,
-          external_id: `${checkName}:${input.context.pullRequest}:${input.context.headSha}`,
         })
       ).data;
   return (

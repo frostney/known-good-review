@@ -9,6 +9,7 @@ import {
   acknowledgeManualFullReview,
   canRequestManualFull,
   requestsManualFullReview,
+  reviewControlResponse,
 } from "../src/github/manual-full";
 import { summarizeUsage } from "../src/telemetry/usage";
 
@@ -87,6 +88,14 @@ describe("GitHub-owned state and telemetry", () => {
     expect(addressesKnownGoodReview("please @known-good-review Stop")).toBeTrue();
     expect(addressesKnownGoodReview("@known-good-reviewer Approve")).toBeFalse();
     expect(addressesKnownGoodReview("Approve")).toBeFalse();
+    expect(reviewControlResponse("@known-good-review Approve")).toBe(
+      "approve",
+    );
+    expect(reviewControlResponse("@known-good-review continue")).toBe(
+      "approve",
+    );
+    expect(reviewControlResponse("@known-good-review Stop")).toBe("stop");
+    expect(reviewControlResponse("@known-good-review review this")).toBeNull();
   });
 
   test("acknowledges the exact manual trigger without blocking the review", async () => {

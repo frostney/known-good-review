@@ -22,8 +22,11 @@ import {
   acknowledgeManualFullReview,
   canRequestManualFull,
   requestsManualFullReview,
+  reviewControlResponse,
 } from "../../src/github/manual-full";
 import {
+  checkName,
+  parseActiveReviewExternalId,
   publishFailClosedCheck,
   publishInProgressCheck,
   publishReview,
@@ -35,6 +38,7 @@ import { handleGitHubLifecycleWebhook } from "../../src/github/lifecycle";
 import { requestMemoryDeletion } from "../../src/memory/client";
 import { findingsToRevalidate } from "../../src/review/revalidation";
 import { discoverabilityApplies } from "../../src/review/discoverability";
+import { effectivePatchFingerprint } from "../../src/review/effective-patch";
 
 const supportedActions = new Set([
   "closed",
@@ -56,6 +60,15 @@ const repositoryDetailsSchema = z.object({
   created_at: z.string().datetime(),
 });
 const accessibleRepositorySchema = z.object({ node_id: z.string().min(1) });
+const checkRunsSchema = z.object({
+  check_runs: z.array(
+    z.object({
+      id: z.number().int().positive(),
+      name: z.string(),
+      external_id: z.string().nullable().optional(),
+    }),
+  ),
+});
 
 async function fetchPullRequest(ctx: GitHubInboundContext, number: number) {
   const response = await ctx.github.request({
@@ -156,6 +169,43 @@ async function fetchPatchFiles(
   );
 }
 
+async function fetchActiveReviewIdentity(
+  ctx: GitHubInboundContext,
+  pullRequest: number,
+  baseSha: string,
+  headSha: string,
+) {
+  const response = await ctx.github.request({
+    method: "GET",
+    path: `/repos/${ctx.repository.owner}/${ctx.repository.name}/commits/${headSha}/check-runs?check_name=${checkName}&filter=latest&per_page=100`,
+  });
+  const checks = checkRunsSchema
+    .parse(response.body)
+    .check_runs.filter((check) => check.name === checkName)
+    .sort((left, right) => right.id - left.id);
+  for (const check of checks) {
+    const identity = parseActiveReviewExternalId(check.external_id, {
+      pullRequest,
+      baseSha,
+      headSha,
+    });
+    if (identity) return identity;
+  }
+  return null;
+}
+
+async function hasReviewControlPermission(
+  ctx: GitHubInboundContext,
+): Promise<boolean> {
+  const permissionResponse = await ctx.github.request({
+    method: "GET",
+    path: `/repos/${ctx.repository.owner}/${ctx.repository.name}/collaborators/${encodeURIComponent(ctx.sender.login)}/permission`,
+  });
+  return canRequestManualFull(
+    permissionSchema.parse(permissionResponse.body).permission,
+  );
+}
+
 function publicationContext(
   ctx: GitHubInboundContext,
   pullRequest: number,
@@ -181,6 +231,77 @@ function publicationContext(
     headSha,
     patchFingerprint,
   };
+}
+
+async function trustedReviewControlAuth(ctx: GitHubInboundContext) {
+  const pullRequestNumber = ctx.conversation.pullRequestNumber;
+  if (!pullRequestNumber) {
+    throw new Error("Review control response did not target a pull request");
+  }
+  const pullRequest = await fetchPullRequest(ctx, pullRequestNumber);
+  if (pullRequest.state !== "open" || pullRequest.draft) {
+    throw new Error("The pull request is no longer open and ready for review");
+  }
+  const [repositoryDetails, configSource, state, patchFiles, activeReview] =
+    await Promise.all([
+      fetchRepositoryDetails(ctx),
+      fetchTrustedConfig(ctx, pullRequest.base.sha),
+      fetchReviewState(ctx, pullRequestNumber),
+      fetchPatchFiles(ctx, pullRequestNumber),
+      fetchActiveReviewIdentity(
+        ctx,
+        pullRequestNumber,
+        pullRequest.base.sha,
+        pullRequest.head.sha,
+      ),
+    ]);
+  if (!activeReview) {
+    throw new Error("No current-head review identity was found");
+  }
+
+  const deltaDispatch =
+    activeReview.kind === "delta"
+      ? planDispatch({
+          action: "synchronize",
+          draft: pullRequest.draft,
+          head: pullRequest.head.sha,
+          patchFiles,
+          state,
+        })
+      : null;
+  if (deltaDispatch && deltaDispatch.plan.kind !== "delta") {
+    throw new Error(
+      `The active delta review no longer matches the current pull request (${deltaDispatch.plan.kind})`,
+    );
+  }
+
+  const plan =
+    activeReview.kind === "full"
+      ? {
+          kind: "full" as const,
+          delaySeconds: 0 as const,
+          reason: activeReview.reason,
+          supersedesActiveReview: true,
+        }
+      : { kind: "delta" as const, revalidatePriorFindings: true as const };
+  const reviewFiles = patchFiles
+    .filter(
+      (file) =>
+        activeReview.kind === "full" ||
+        deltaDispatch?.changedFiles.includes(file.path),
+    )
+    .map((file) => ({ path: file.path, status: file.status }));
+
+  return withTrustedReviewContext(defaultGitHubAuth(ctx), {
+    baseSha: pullRequest.base.sha,
+    configSource,
+    event: "review-control-response",
+    headSha: pullRequest.head.sha,
+    patchFingerprint: effectivePatchFingerprint(patchFiles),
+    plan: JSON.stringify(plan),
+    ...repositoryDetails,
+    reviewFiles,
+  });
 }
 
 async function dispatchReview(input: {
@@ -323,7 +444,10 @@ async function dispatchReview(input: {
   await publishInProgressCheck({
     context,
     octokit,
-    reviewKind: dispatch.plan.kind,
+    review:
+      dispatch.plan.kind === "full"
+        ? { kind: dispatch.plan.kind, reason: dispatch.plan.reason }
+        : { kind: dispatch.plan.kind },
   });
 
   if (dispatch.plan.kind === "full" && dispatch.plan.reason === "initial") {
@@ -422,17 +546,27 @@ async function onComment(ctx: GitHubInboundContext, comment: GitHubComment) {
     return null;
   }
   if (!requestsManualFullReview(comment.body)) {
-    return addressesKnownGoodReview(comment.body)
-      ? { auth: defaultGitHubAuth(ctx) }
-      : null;
+    if (!addressesKnownGoodReview(comment.body)) return null;
+    const control = reviewControlResponse(comment.body);
+    if (!control) return { auth: defaultGitHubAuth(ctx) };
+    if (!(await hasReviewControlPermission(ctx))) {
+      await ctx.thread.post(
+        "Continuing or stopping a review requires write, maintain, or admin repository permission.",
+      );
+      return null;
+    }
+    if (control === "stop") return { auth: defaultGitHubAuth(ctx) };
+    try {
+      return { auth: await trustedReviewControlAuth(ctx) };
+    } catch (error) {
+      console.error("known-good-review could not restore review context", error);
+      await ctx.thread.post(
+        "The active review context could not be restored. Request a new full review instead of approving this stale continuation.",
+      );
+      return null;
+    }
   }
-  const permissionResponse = await ctx.github.request({
-    method: "GET",
-    path: `/repos/${ctx.repository.owner}/${ctx.repository.name}/collaborators/${encodeURIComponent(ctx.sender.login)}/permission`,
-  });
-  const authorized = canRequestManualFull(
-    permissionSchema.parse(permissionResponse.body).permission,
-  );
+  const authorized = await hasReviewControlPermission(ctx);
   if (!authorized) {
     await ctx.thread.post(
       "A manual full review requires write, maintain, or admin repository permission.",

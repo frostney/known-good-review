@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Octokit } from "@octokit/rest";
 import {
+  activeReviewExternalId,
+  parseActiveReviewExternalId,
   publishInProgressCheck,
   publishReview,
 } from "../src/github/publication";
@@ -92,6 +94,31 @@ function report(): ReviewReport {
 }
 
 describe("GitHub publication lifecycle", () => {
+  test("round-trips current-head review identity through the Check Run", () => {
+    const full = activeReviewExternalId(context(), {
+      kind: "full",
+      reason: "manual",
+    });
+    const delta = activeReviewExternalId(context(), { kind: "delta" });
+
+    expect(parseActiveReviewExternalId(full, context())).toEqual({
+      kind: "full",
+      reason: "manual",
+    });
+    expect(parseActiveReviewExternalId(delta, context())).toEqual({
+      kind: "delta",
+    });
+    expect(
+      parseActiveReviewExternalId(full, { ...context(), headSha: "new-head" }),
+    ).toBeNull();
+    expect(
+      parseActiveReviewExternalId(full, { ...context(), baseSha: "new-base" }),
+    ).toBeNull();
+    expect(
+      parseActiveReviewExternalId(full, { ...context(), pullRequest: 8 }),
+    ).toBeNull();
+  });
+
   test("creates a fresh Check Run when the prior run is completed", async () => {
     const requests: CapturedRequest[] = [];
     const octokit = new Octokit({
@@ -136,7 +163,7 @@ describe("GitHub publication lifecycle", () => {
     await publishInProgressCheck({
       context: context(),
       octokit,
-      reviewKind: "full",
+      review: { kind: "full", reason: "manual" },
     });
 
     expect(
@@ -258,7 +285,7 @@ describe("GitHub publication lifecycle", () => {
     await publishInProgressCheck({
       context: context(),
       octokit,
-      reviewKind: "full",
+      review: { kind: "full", reason: "manual" },
     });
     await publishReview({ context: context(), octokit, report: report() });
 
