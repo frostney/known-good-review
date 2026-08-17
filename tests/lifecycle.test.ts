@@ -1,9 +1,24 @@
 import { describe, expect, test } from "bun:test";
+import { ownsReviewLifecycle } from "../src/review/execution-session";
 import { planReview } from "../src/review/lifecycle";
 
 const head = "abc123";
 
 describe("review lifecycle", () => {
+  test("reserves publication and shared-sandbox teardown for the root", () => {
+    expect(
+      ownsReviewLifecycle({ channelKind: "github", hasParent: false }),
+    ).toBe(true);
+    expect(
+      ownsReviewLifecycle({ channelKind: "subagent", hasParent: true }),
+    ).toBe(false);
+    expect(
+      ownsReviewLifecycle({ channelKind: "subagent", hasParent: false }),
+    ).toBe(false);
+    expect(
+      ownsReviewLifecycle({ channelKind: "github", hasParent: true }),
+    ).toBe(false);
+  });
   test("debounces a ready PR opened from the outset", () => {
     expect(
       planReview({

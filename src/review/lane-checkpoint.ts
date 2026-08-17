@@ -123,6 +123,28 @@ export function validateLaneCheckpointCoverage(
   }
 }
 
+export function validateLaneCheckpointEvidenceProgress(
+  content: LaneCheckpointContent,
+  progress: {
+    readonly completedEntries: readonly number[];
+    readonly cursor: unknown | null;
+  },
+): void {
+  if (
+    JSON.stringify(content.reviewedEntries) !==
+    JSON.stringify(progress.completedEntries)
+  ) {
+    throw new Error(
+      "Lane checkpoint reviewed entries must match application-recorded evidence coverage",
+    );
+  }
+  if (content.status === "complete" && progress.cursor !== null) {
+    throw new Error(
+      "A lane cannot complete before its immutable evidence packets are exhausted",
+    );
+  }
+}
+
 export function laneCheckpointPath(
   patchFingerprint: string,
   axis: ReviewAxis,

@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import type { ReviewAxis } from "./axes";
+import { reviewAxes } from "./axes";
 
 const revisionSchema = z.string().regex(/^[a-f0-9]{40}$/);
 const fingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -103,6 +105,45 @@ export interface ReviewEvidenceIdentity {
 
 export const reviewEvidencePageSize = 50;
 export const reviewEvidencePatchCharacters = 16_000;
+export const reviewEvidencePacketCharacters = 500_000;
+
+const reviewEvidenceCursorSchema = z.object({
+  entryIndex: z.number().int().nonnegative(),
+  characterOffset: z.number().int().nonnegative(),
+});
+
+const reviewEvidenceProgressSchema = z.object({
+  cursor: reviewEvidenceCursorSchema.nullable(),
+  completedEntries: z.array(z.number().int().nonnegative()),
+});
+
+const packetEntrySchema = z.object({
+  index: z.number().int().nonnegative(),
+  entry: z.discriminatedUnion("kind", [
+    includedEvidenceSchema,
+    excludedEvidenceSchema,
+  ]),
+  characterOffset: z.number().int().nonnegative(),
+  content: z.string().optional(),
+  nextCharacterOffset: z.number().int().nonnegative().nullable(),
+});
+
+const reviewEvidencePacketSchema = z.object({
+  entries: z.array(packetEntrySchema),
+  completedEntries: z.array(z.number().int().nonnegative()),
+  nextCursor: reviewEvidenceCursorSchema.nullable(),
+  totalEntries: z.number().int().nonnegative(),
+});
+
+const packetReceiptSchema = z.object({
+  before: reviewEvidenceProgressSchema,
+  after: reviewEvidenceProgressSchema,
+  packet: reviewEvidencePacketSchema,
+});
+
+export type ReviewEvidenceProgress = z.infer<
+  typeof reviewEvidenceProgressSchema
+>;
 
 export function reviewEvidenceDirectory(patchFingerprint: string): string {
   return `/tmp/known-good-review/evidence/${fingerprintSchema.parse(patchFingerprint)}`;
@@ -121,6 +162,22 @@ export function reviewEvidencePatchFile(
     fileName,
     filePath: `${reviewEvidenceDirectory(patchFingerprint)}/${fileName}`,
   };
+}
+
+function reviewEvidenceProgressPath(
+  patchFingerprint: string,
+  axis: ReviewAxis,
+): string {
+  return `${reviewEvidenceDirectory(patchFingerprint)}/progress/${z.enum(reviewAxes).parse(axis)}.json`;
+}
+
+function reviewEvidencePacketReceiptPath(
+  patchFingerprint: string,
+  axis: ReviewAxis,
+  sessionId: string,
+): string {
+  const sessionHash = createHash("sha256").update(sessionId).digest("hex");
+  return `${reviewEvidenceDirectory(patchFingerprint)}/packets/${z.enum(reviewAxes).parse(axis)}-${sessionHash}.json`;
 }
 
 export async function resetReviewEvidence(
@@ -214,7 +271,11 @@ export function reviewEvidencePage(
 export async function readReviewEvidencePatch(
   sandbox: ReviewEvidenceSandbox,
   manifest: ReviewEvidenceManifest,
-  input: { readonly path: string; readonly cursor: number },
+  input: {
+    readonly path: string;
+    readonly cursor: number;
+    readonly maxCharacters?: number;
+  },
 ) {
   const entry = manifest.entries.find(
     (candidate): candidate is IncludedReviewEvidence =>
@@ -241,7 +302,13 @@ export async function readReviewEvidencePatch(
     .nonnegative()
     .max(source.length)
     .parse(input.cursor);
-  let end = Math.min(cursor + reviewEvidencePatchCharacters, source.length);
+  const maxCharacters = z
+    .number()
+    .int()
+    .positive()
+    .max(reviewEvidencePacketCharacters)
+    .parse(input.maxCharacters ?? reviewEvidencePatchCharacters);
+  let end = Math.min(cursor + maxCharacters, source.length);
   if (
     end < source.length &&
     source.charCodeAt(end - 1) >= 0xd800 &&
@@ -261,4 +328,147 @@ export async function readReviewEvidencePatch(
     nextCursor: nextCursor < source.length ? nextCursor : null,
     totalCharacters: source.length,
   };
+}
+
+export async function readReviewEvidenceProgress(
+  sandbox: ReviewEvidenceSandbox,
+  manifest: ReviewEvidenceManifest,
+  axis: ReviewAxis,
+): Promise<ReviewEvidenceProgress> {
+  const source = await sandbox.readTextFile({
+    path: reviewEvidenceProgressPath(manifest.patchFingerprint, axis),
+  });
+  if (source === null) {
+    return {
+      cursor:
+        manifest.entries.length === 0
+          ? null
+          : { entryIndex: 0, characterOffset: 0 },
+      completedEntries: [],
+    };
+  }
+  return reviewEvidenceProgressSchema.parse(JSON.parse(source));
+}
+
+async function writeReviewEvidenceProgress(
+  sandbox: ReviewEvidenceSandbox,
+  manifest: ReviewEvidenceManifest,
+  axis: ReviewAxis,
+  progress: ReviewEvidenceProgress,
+): Promise<void> {
+  await sandbox.writeTextFile({
+    path: reviewEvidenceProgressPath(manifest.patchFingerprint, axis),
+    content: `${JSON.stringify(reviewEvidenceProgressSchema.parse(progress))}\n`,
+  });
+}
+
+async function buildReviewEvidencePacket(
+  sandbox: ReviewEvidenceSandbox,
+  manifest: ReviewEvidenceManifest,
+  progress: ReviewEvidenceProgress,
+) {
+  if (progress.cursor === null) {
+    return reviewEvidencePacketSchema.parse({
+      entries: [],
+      completedEntries: progress.completedEntries,
+      nextCursor: null,
+      totalEntries: manifest.entries.length,
+    });
+  }
+  let entryIndex = progress.cursor.entryIndex;
+  let characterOffset = progress.cursor.characterOffset;
+  let remainingCharacters = reviewEvidencePacketCharacters;
+  const entries: Array<z.infer<typeof packetEntrySchema>> = [];
+  const completedEntries = [...progress.completedEntries];
+
+  while (entryIndex < manifest.entries.length) {
+    const entry = manifest.entries[entryIndex];
+    if (!entry) break;
+    if (entry.kind === "excluded") {
+      entries.push({
+        index: entryIndex,
+        entry,
+        characterOffset: 0,
+        nextCharacterOffset: null,
+      });
+      completedEntries.push(entryIndex);
+      entryIndex += 1;
+      characterOffset = 0;
+      continue;
+    }
+    if (remainingCharacters <= 0) break;
+    const patch = await readReviewEvidencePatch(sandbox, manifest, {
+      path: entry.path,
+      cursor: characterOffset,
+      maxCharacters: remainingCharacters,
+    });
+    entries.push({
+      index: entryIndex,
+      entry,
+      characterOffset,
+      content: patch.content,
+      nextCharacterOffset: patch.nextCursor,
+    });
+    remainingCharacters -= patch.content.length;
+    if (patch.nextCursor !== null) {
+      characterOffset = patch.nextCursor;
+      break;
+    }
+    completedEntries.push(entryIndex);
+    entryIndex += 1;
+    characterOffset = 0;
+  }
+
+  return reviewEvidencePacketSchema.parse({
+    entries,
+    completedEntries,
+    nextCursor:
+      entryIndex < manifest.entries.length
+        ? { entryIndex, characterOffset }
+        : null,
+    totalEntries: manifest.entries.length,
+  });
+}
+
+export async function readNextReviewEvidencePacket(
+  sandbox: ReviewEvidenceSandbox,
+  manifest: ReviewEvidenceManifest,
+  axis: ReviewAxis,
+  sessionId: string,
+) {
+  const receiptPath = reviewEvidencePacketReceiptPath(
+    manifest.patchFingerprint,
+    axis,
+    sessionId,
+  );
+  const existingReceipt = await sandbox.readTextFile({ path: receiptPath });
+  if (existingReceipt !== null) {
+    const receipt = packetReceiptSchema.parse(JSON.parse(existingReceipt));
+    const current = await readReviewEvidenceProgress(sandbox, manifest, axis);
+    if (JSON.stringify(current) === JSON.stringify(receipt.before)) {
+      await writeReviewEvidenceProgress(
+        sandbox,
+        manifest,
+        axis,
+        receipt.after,
+      );
+    } else if (JSON.stringify(current) !== JSON.stringify(receipt.after)) {
+      throw new Error("Review evidence packet progress is inconsistent");
+    }
+    return receipt.packet;
+  }
+
+  const before = await readReviewEvidenceProgress(sandbox, manifest, axis);
+  const packet = await buildReviewEvidencePacket(sandbox, manifest, before);
+  const after = reviewEvidenceProgressSchema.parse({
+    cursor: packet.nextCursor,
+    completedEntries: packet.completedEntries,
+  });
+  const receipt = packetReceiptSchema.parse({ before, after, packet });
+  await sandbox.writeTextFile({
+    path: receiptPath,
+    content: `${JSON.stringify(receipt)}\n`,
+  });
+  await writeReviewEvidenceProgress(sandbox, manifest, axis, after);
+  return packet;
 }
