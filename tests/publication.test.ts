@@ -9,6 +9,7 @@ import type { ReviewReport } from "../src/review/findings";
 
 interface CapturedRequest {
   readonly body: unknown;
+  readonly headers: Headers;
   readonly method: string;
   readonly path: string;
 }
@@ -89,7 +90,12 @@ describe("GitHub publication lifecycle", () => {
           const method = init?.method ?? "GET";
           const body =
             typeof init?.body === "string" ? JSON.parse(init.body) : null;
-          requests.push({ body, method, path: url.pathname });
+          requests.push({
+            body,
+            headers: new Headers(init?.headers),
+            method,
+            path: url.pathname,
+          });
           if (method === "GET" && url.pathname.endsWith("/check-runs")) {
             return json({
               check_runs: [
@@ -146,7 +152,12 @@ describe("GitHub publication lifecycle", () => {
           const method = init?.method ?? "GET";
           const body =
             typeof init?.body === "string" ? JSON.parse(init.body) : null;
-          requests.push({ body, method, path: url.pathname });
+          requests.push({
+            body,
+            headers: new Headers(init?.headers),
+            method,
+            path: url.pathname,
+          });
 
           if (method === "GET" && url.pathname.endsWith("/check-runs")) {
             return json({
@@ -235,6 +246,15 @@ describe("GitHub publication lifecycle", () => {
         "### ⚠️ The feedback loses its code location",
       ),
     });
+    expect(
+      requests
+        .find(
+          (request) =>
+            request.method === "POST" &&
+            request.path.endsWith("/pulls/7/comments"),
+        )
+        ?.headers.get("x-github-api-version"),
+    ).toBe("2026-03-10");
     expect(
       requests.find(
         (request) =>
