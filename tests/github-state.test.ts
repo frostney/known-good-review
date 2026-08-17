@@ -5,6 +5,7 @@ import {
   pendingReviewState,
 } from "../src/github/review-state";
 import {
+  addressesKnownGoodReview,
   acknowledgeManualFullReview,
   canRequestManualFull,
   requestsManualFullReview,
@@ -79,6 +80,13 @@ describe("GitHub-owned state and telemetry", () => {
     expect(canRequestManualFull("write")).toBeTrue();
     expect(canRequestManualFull("maintain")).toBeTrue();
     expect(canRequestManualFull("read")).toBeFalse();
+  });
+
+  test("passes ordinary bot mentions to Eve's native response handling", () => {
+    expect(addressesKnownGoodReview("@known-good-review Approve")).toBeTrue();
+    expect(addressesKnownGoodReview("please @known-good-review Stop")).toBeTrue();
+    expect(addressesKnownGoodReview("@known-good-reviewer Approve")).toBeFalse();
+    expect(addressesKnownGoodReview("Approve")).toBeFalse();
   });
 
   test("acknowledges the exact manual trigger without blocking the review", async () => {

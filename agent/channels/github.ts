@@ -18,6 +18,7 @@ import {
   reviewStateFromComments,
 } from "../../src/github/inbound";
 import {
+  addressesKnownGoodReview,
   acknowledgeManualFullReview,
   canRequestManualFull,
   requestsManualFullReview,
@@ -417,11 +418,13 @@ async function onPullRequest(
 }
 
 async function onComment(ctx: GitHubInboundContext, comment: GitHubComment) {
-  if (
-    ctx.conversation.kind !== "pull_request" ||
-    !requestsManualFullReview(comment.body)
-  ) {
+  if (ctx.conversation.kind !== "pull_request") {
     return null;
+  }
+  if (!requestsManualFullReview(comment.body)) {
+    return addressesKnownGoodReview(comment.body)
+      ? { auth: defaultGitHubAuth(ctx) }
+      : null;
   }
   const permissionResponse = await ctx.github.request({
     method: "GET",
