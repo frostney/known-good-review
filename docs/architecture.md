@@ -49,10 +49,14 @@ head, installation, or Check name as model input.
 ## Review execution
 
 The coordinator loads the vendored `code-review` skill and maps active axes
-one-to-one to Eve's built-in subagent. `Workflow` allows at most four child
-calls and runs independent axes in parallel. Child routing envelopes contain an
-exact skill axis or the `revalidation` role. Dynamic model routing maps these
-roles directly to trusted `agents` configuration.
+one-to-one to Eve's built-in subagent. After the root revalidates the exact PR
+head, an Eve `action.result` hook prepares the classified patch once in the
+shared sandbox without putting preparation commands or raw patches in model
+history. Lanes page an integrity-checked manifest and bounded patch chunks
+instead of independently reconstructing the diff.
+Child routing envelopes contain an exact skill axis or the `revalidation` role.
+Dynamic model routing maps these roles directly to trusted `agents`
+configuration.
 
 AI Gateway receives the first model and its ordered `models` fallback array.
 The Gateway generation lookup records the actual model and provider that
@@ -63,6 +67,21 @@ within its configured model group, then the remaining same-model axes run in
 parallel. Eve and AI Gateway own automatic provider caching. Memory retrieval
 occurs after the stable shared prefix and is advisory evidence that each axis
 must revalidate against the current pull request.
+
+Each lane writes one compact checkpoint before it returns. A complete
+checkpoint owns the terminal worker report and prevents duplicate work; the
+Workflow returns only completion receipts. An incomplete checkpoint records
+reviewed and remaining manifest entry indexes, reproduced observations, next
+steps, and limitations. The same native Eve Workflow can start a fresh built-in
+subagent that reconciles that packet with the immutable manifest, without
+inheriting the prior model history. This reuses the checkpoint-and-reconcile
+semantics of Milestone Rush; it does not introduce another workflow runtime or
+state service.
+
+Eve compacts a lane at 25 percent of the selected model's context window. The
+percentage adapts to arbitrary Gateway models while leaving enough room for a
+large evidence chunk, related source, and probe output. Compaction and fresh
+checkpoint continuation preserve review depth; neither is a completion gate.
 
 ## Repository memory
 

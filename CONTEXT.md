@@ -22,6 +22,14 @@ or act as a general-purpose GitHub assistant.
   findings. It is not a new review axis.
 - **Effective patch:** normalized per-file PR patch content that ignores file
   ordering, Git blob index lines, hunk line-number movement, and CRLF/LF noise.
+- **Review evidence bundle:** the application-prepared, content-addressed
+  manifest, included patch chunks, and classified-file metadata for one exact
+  base, head, and effective-patch fingerprint. An Eve hook creates it after
+  root head verification and before the next model step.
+- **Lane checkpoint:** a compact review-axis work packet containing coverage,
+  reproduced observations, remaining work, and limitations. A fresh Eve
+  subagent reconciles it with the evidence bundle instead of inheriting raw
+  model history.
 - **Lost baseline:** evidence that a review existed but its state/artifact is
   missing, malformed, failed, or unusable. This state requires an authorized
   manual full review; it never causes an automatic second full review.

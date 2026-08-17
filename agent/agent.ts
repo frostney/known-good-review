@@ -16,5 +16,8 @@ export default defineAgent({
     maxInputTokensPerSession: 8_000_000,
     maxOutputTokensPerSession: 512_000,
   },
+  compaction: {
+    thresholdPercent: 0.25,
+  },
   reasoning: "high",
 });
