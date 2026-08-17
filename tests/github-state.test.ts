@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   decodeReviewState,
   encodeReviewState,
+  pendingReviewState,
 } from "../src/github/review-state";
 import {
   canRequestManualFull,
@@ -10,7 +11,7 @@ import {
 import { summarizeUsage } from "../src/telemetry/usage";
 
 describe("GitHub-owned state and telemetry", () => {
-  test("round-trips the hidden GitHub state marker", () => {
+  test("round-trips state behind a visible GitHub result", () => {
     const state = {
       schemaVersion: 2 as const,
       app: "known-good-review" as const,
@@ -53,8 +54,20 @@ describe("GitHub-owned state and telemetry", () => {
       },
       updatedAt: "2026-08-16T12:00:00.000Z",
     };
-    expect(decodeReviewState(encodeReviewState(state))).toEqual(state);
+    const encoded = encodeReviewState(state);
+    expect(encoded).toContain("## ✅ known-good-review: approved");
+    expect(encoded).toContain("No findings were reported.");
+    expect(decodeReviewState(encoded)).toEqual(state);
     expect(decodeReviewState("ordinary comment")).toBeNull();
+  });
+
+  test("shows accepted review progress instead of an empty state comment", () => {
+    const body = encodeReviewState(
+      pendingReviewState({ pullRequest: 42, status: "running" }),
+    );
+    expect(body).toContain("## ⏳ known-good-review: in progress");
+    expect(body).toContain("The review is currently running.");
+    expect(decodeReviewState(body)?.initialFullStatus).toBe("running");
   });
 
   test("recognizes manual full commands and repository write authority", () => {

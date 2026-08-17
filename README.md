@@ -3,8 +3,9 @@
 `known-good-review` is a review-only GitHub App built as a standalone Eve
 application. It runs on Vercel, uses Vercel AI Gateway for models, inspects pull
 requests inside Vercel Sandbox, receives GitHub App events through Eve's native
-GitHub channel, and publishes one Check Run plus stable finding comments through
-the official Chat SDK GitHub adapter's typed Octokit surface.
+GitHub channel, and publishes one Check Run, one visible result summary, and
+stable inline finding threads through the official Chat SDK GitHub adapter's
+typed Octokit surface.
 
 This repository is a local scaffold. No GitHub App, Vercel project, Connect
 connector, deployment, package, or other external resource has been created.
@@ -42,8 +43,9 @@ flowchart TD
   replacement full review. A write/maintain/admin user can explicitly request
   one with `@known-good-review run full review`.
 
-GitHub comments hold the authoritative versioned review state and complete v2
-findings artifact. Convex stores advisory, repository-scoped cross-PR memory
+One visible GitHub summary comment also holds the hidden authoritative versioned
+review state and complete v2 findings artifact. Convex stores advisory,
+repository-scoped cross-PR memory
 through `@convex-dev/rag`; it never owns the current verdict, baseline, or
 finding status. Recent matches remain individual while older matches collapse
 to bounded semantic-cluster representatives after the repository has enough
@@ -156,7 +158,8 @@ the installation.
 Do not add a second Chat SDK webhook route. The decorated Eve route owns inbound
 verification, lifecycle cleanup, durable PR sessions, checkout, and steering.
 The Chat SDK adapter is the typed outbound publication boundary for Check Runs,
-finding comments, and the rare installation-reconciliation API read.
+the result summary, inline finding threads, and the rare
+installation-reconciliation API read.
 
 See [architecture](docs/architecture.md), [domain context](CONTEXT.md), and
 [skill provenance](docs/skill-provenance.md).

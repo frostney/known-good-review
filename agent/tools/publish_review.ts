@@ -16,7 +16,7 @@ import { reviewReportSchema } from "../../src/review/findings";
 
 export default defineTool({
   description:
-    "Validate and publish the final code-review v2 report to the one known-good-review Check Run and stable finding comments. Repository, pull request, and head are taken only from trusted GitHub context.",
+    "Validate and publish the final code-review v2 report to the known-good-review Check Run, visible result summary, and stable inline finding threads. Repository, pull request, and head are taken only from trusted GitHub context.",
   inputSchema: z.object({ report: reviewReportSchema }),
   async execute({ report }, ctx) {
     if (ctx.session.parent) {

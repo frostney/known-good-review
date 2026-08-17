@@ -1,5 +1,9 @@
 import { z } from "zod";
 import { reviewReportSchema } from "../review/findings";
+import {
+  reviewProgressBody,
+  reviewResultBody,
+} from "./review-presentation";
 
 const stateMarker = "known-good-review:state";
 
@@ -29,8 +33,13 @@ export const reviewStateSchema = z.object({
 export type ReviewState = z.infer<typeof reviewStateSchema>;
 
 export function encodeReviewState(state: ReviewState): string {
-  const json = JSON.stringify(reviewStateSchema.parse(state));
-  return `<!-- ${stateMarker}\n${Buffer.from(json).toString("base64url")}\n-->`;
+  const parsed = reviewStateSchema.parse(state);
+  const json = JSON.stringify(parsed);
+  const visible =
+    parsed.initialFullStatus === "completed" && parsed.baseline
+      ? reviewResultBody(parsed.baseline.report)
+      : reviewProgressBody(parsed.initialFullStatus);
+  return `${visible}\n\n<!-- ${stateMarker}\n${Buffer.from(json).toString("base64url")}\n-->`;
 }
 
 export function decodeReviewState(comment: string): ReviewState | null {
