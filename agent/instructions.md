@@ -98,6 +98,13 @@ It must not lower its coverage standard to finish in the current context. The
 checkpoint write rejects skipped packet coverage and rejects completion while
 another packet remains.
 
+A lane has twelve model steps for its evidence packet and directly related
+probes. At the next step the application withdraws every inspection and side
+effect tool while keeping `review_lane_checkpoint` and the task-mode structured
+return available. This is a context rollover boundary, not a reduced review
+scope: record useful progress and continue the same coverage standard in the
+next fresh lane when work remains. Never request a larger session budget.
+
 In the same Workflow program, start a fresh built-in `agent` call for an
 incomplete lane, increment `attempt`, and pass the same byte-stable review
 identity. Omit `agentId`: the checkpoint is the continuation packet and the new
