@@ -15,7 +15,18 @@ export { findingBody } from "./review-presentation";
 
 export const checkName = "known-good-review";
 const findingMarkerPrefix = "known-good-review:finding:";
-const inlineCommentApiVersion = "2026-03-10";
+
+const addReviewThreadMutation = `
+  mutation KnownGoodReviewAddReviewThread(
+    $input: AddPullRequestReviewThreadInput!
+  ) {
+    addPullRequestReviewThread(input: $input) {
+      thread {
+        id
+      }
+    }
+  }
+`;
 
 type OctokitClient = Octokit;
 
@@ -260,6 +271,93 @@ function sameCommentLocation(
   return existing.line === location.line && existing.side === location.side;
 }
 
+interface NewReviewThread {
+  readonly body: string;
+  readonly finding: ReviewFinding;
+  readonly location: ReviewCommentLocation;
+}
+
+async function deleteViewerPendingReviews(
+  octokit: OctokitClient,
+  context: TrustedGitHubContext,
+): Promise<void> {
+  const reviews = await octokit.paginate(octokit.rest.pulls.listReviews, {
+    owner: context.owner,
+    repo: context.repo,
+    pull_number: context.pullRequest,
+    per_page: 100,
+  });
+  for (const review of reviews) {
+    if (review.state !== "PENDING") continue;
+    await octokit.rest.pulls.deletePendingReview({
+      owner: context.owner,
+      repo: context.repo,
+      pull_number: context.pullRequest,
+      review_id: review.id,
+    });
+  }
+}
+
+async function createReviewThreads(
+  octokit: OctokitClient,
+  context: TrustedGitHubContext,
+  threads: readonly NewReviewThread[],
+): Promise<void> {
+  if (threads.length === 0) return;
+  await deleteViewerPendingReviews(octokit, context);
+  const created = await octokit.rest.pulls.createReview({
+    owner: context.owner,
+    repo: context.repo,
+    pull_number: context.pullRequest,
+    commit_id: context.headSha,
+  });
+  const pullRequestReviewId = created.data.node_id;
+  if (!pullRequestReviewId) {
+    throw new Error("GitHub did not return the pending review identity");
+  }
+  try {
+    for (const thread of threads) {
+      await octokit.graphql(addReviewThreadMutation, {
+        input: {
+          body: thread.body,
+          path: thread.finding.location.path,
+          pullRequestReviewId,
+          subjectType:
+            thread.location.subjectType === "line" ? "LINE" : "FILE",
+          ...(thread.location.subjectType === "line"
+            ? {
+                line: thread.location.line,
+                side: thread.location.side,
+              }
+            : {}),
+        },
+      });
+    }
+    await octokit.rest.pulls.submitReview({
+      owner: context.owner,
+      repo: context.repo,
+      pull_number: context.pullRequest,
+      review_id: created.data.id,
+      event: "COMMENT",
+    });
+  } catch (error) {
+    try {
+      await octokit.rest.pulls.deletePendingReview({
+        owner: context.owner,
+        repo: context.repo,
+        pull_number: context.pullRequest,
+        review_id: created.data.id,
+      });
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "GitHub review publication and pending-review cleanup both failed",
+      );
+    }
+    throw error;
+  }
+}
+
 async function reconcileFindingComments(
   octokit: OctokitClient,
   context: TrustedGitHubContext,
@@ -279,6 +377,7 @@ async function reconcileFindingComments(
     }),
   );
   const active = new Set(findings.map((finding) => finding.id));
+  const newThreads: NewReviewThread[] = [];
 
   for (const finding of findings) {
     const location = reviewCommentLocation(finding, files);
@@ -302,27 +401,11 @@ async function reconcileFindingComments(
           body: retiredFindingBody(finding.id),
         });
       }
-      await octokit.request(
-        "POST /repos/{owner}/{repo}/pulls/{pull_number}/comments",
-        {
-          owner: context.owner,
-          repo: context.repo,
-          pull_number: context.pullRequest,
-          commit_id: context.headSha,
-          path: finding.location.path,
-          body,
-          ...(location.subjectType === "line"
-            ? {
-                line: location.line,
-                side: location.side,
-                subject_type: "line" as const,
-              }
-            : { subject_type: "file" as const }),
-          headers: { "x-github-api-version": inlineCommentApiVersion },
-        },
-      );
+      newThreads.push({ body, finding, location });
     }
   }
+
+  await createReviewThreads(octokit, context, newThreads);
 
   for (const [id, prior] of existing) {
     if (!active.has(id)) {

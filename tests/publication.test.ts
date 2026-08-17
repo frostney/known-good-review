@@ -20,6 +20,18 @@ function json(value: unknown): Response {
   });
 }
 
+function graphqlOperation(body: unknown): string {
+  if (
+    typeof body === "object" &&
+    body !== null &&
+    "query" in body &&
+    typeof body.query === "string"
+  ) {
+    return body.query;
+  }
+  return "";
+}
+
 function context(): TrustedGitHubContext {
   return {
     installationId: 1,
@@ -188,8 +200,34 @@ describe("GitHub publication lifecycle", () => {
           if (method === "GET" && url.pathname.endsWith("/pulls/7/comments")) {
             return json([]);
           }
-          if (method === "POST" && url.pathname.endsWith("/pulls/7/comments")) {
-            return json({ id: 101, body, path: "src/review.ts", line: 11 });
+          if (method === "GET" && url.pathname.endsWith("/pulls/7/reviews")) {
+            return json([{ id: 77, state: "PENDING" }]);
+          }
+          if (
+            method === "DELETE" &&
+            url.pathname.endsWith("/pulls/7/reviews/77")
+          ) {
+            return json({ id: 77, state: "PENDING" });
+          }
+          if (method === "POST" && url.pathname.endsWith("/pulls/7/reviews")) {
+            return json({ id: 101, node_id: "PRR_101" });
+          }
+          if (method === "POST" && url.pathname === "/graphql") {
+            const operation = graphqlOperation(body);
+            if (operation.includes("KnownGoodReviewAddReviewThread")) {
+              return json({
+                data: {
+                  addPullRequestReviewThread: { thread: { id: "PRRT_102" } },
+                },
+              });
+            }
+            throw new Error(`Unexpected GraphQL operation: ${operation}`);
+          }
+          if (
+            method === "POST" &&
+            url.pathname.endsWith("/pulls/7/reviews/101/events")
+          ) {
+            return json({ id: 101, node_id: "PRR_101", state: "COMMENTED" });
           }
           if (method === "GET" && url.pathname.endsWith("/issues/7/comments")) {
             return json([
@@ -234,27 +272,43 @@ describe("GitHub publication lifecycle", () => {
       requests.find(
         (request) =>
           request.method === "POST" &&
-          request.path.endsWith("/pulls/7/comments"),
+          request.path === "/graphql" &&
+          graphqlOperation(request.body).includes(
+            "KnownGoodReviewAddReviewThread",
+          ),
       )?.body,
     ).toMatchObject({
-      commit_id: "head",
-      line: 11,
-      path: "src/review.ts",
-      side: "RIGHT",
-      subject_type: "line",
-      body: expect.stringContaining(
-        "### ⚠️ The feedback loses its code location",
-      ),
+      variables: {
+        input: {
+          body: expect.stringContaining(
+            "### ⚠️ The feedback loses its code location",
+          ),
+          line: 11,
+          path: "src/review.ts",
+          pullRequestReviewId: "PRR_101",
+          side: "RIGHT",
+          subjectType: "LINE",
+        },
+      },
     });
     expect(
-      requests
-        .find(
-          (request) =>
-            request.method === "POST" &&
-            request.path.endsWith("/pulls/7/comments"),
-        )
-        ?.headers.get("x-github-api-version"),
-    ).toBe("2026-03-10");
+      requests.some(
+        (request) =>
+          request.method === "DELETE" &&
+          request.path.endsWith("/pulls/7/reviews/77"),
+      ),
+    ).toBeTrue();
+    expect(
+      requests.some(
+        (request) =>
+          request.method === "POST" &&
+          request.path.endsWith("/pulls/7/reviews/101/events") &&
+          typeof request.body === "object" &&
+          request.body !== null &&
+          "event" in request.body &&
+          request.body.event === "COMMENT",
+      ),
+    ).toBeTrue();
     expect(
       requests.find(
         (request) =>
@@ -281,5 +335,81 @@ describe("GitHub publication lifecycle", () => {
     ).toMatchObject({
       body: expect.stringContaining("### ✅ No longer active"),
     });
+  });
+
+  test("removes a pending review when native thread creation fails", async () => {
+    const requests: CapturedRequest[] = [];
+    const octokit = new Octokit({
+      auth: "test-token",
+      request: {
+        fetch: async (resource: Request | string | URL, init?: RequestInit) => {
+          const url = new URL(String(resource));
+          const method = init?.method ?? "GET";
+          const body =
+            typeof init?.body === "string" ? JSON.parse(init.body) : null;
+          requests.push({
+            body,
+            headers: new Headers(init?.headers),
+            method,
+            path: url.pathname,
+          });
+
+          if (method === "GET" && url.pathname.endsWith("/pulls/7/files")) {
+            return json([
+              {
+                filename: "src/review.ts",
+                status: "modified",
+                sha: "blob",
+                patch: "@@ -10,3 +10,3 @@\n context\n-old\n+new\n context",
+              },
+            ]);
+          }
+          if (method === "GET" && url.pathname.endsWith("/pulls/7/comments")) {
+            return json([]);
+          }
+          if (method === "GET" && url.pathname.endsWith("/pulls/7/reviews")) {
+            return json([]);
+          }
+          if (method === "POST" && url.pathname.endsWith("/pulls/7/reviews")) {
+            return json({ id: 101, node_id: "PRR_101" });
+          }
+          if (method === "POST" && url.pathname === "/graphql") {
+            const operation = graphqlOperation(body);
+            if (operation.includes("KnownGoodReviewAddReviewThread")) {
+              return json({
+                data: { addPullRequestReviewThread: null },
+                errors: [{ message: "native thread creation failed" }],
+              });
+            }
+            throw new Error(`Unexpected GraphQL operation: ${operation}`);
+          }
+          if (
+            method === "DELETE" &&
+            url.pathname.endsWith("/pulls/7/reviews/101")
+          ) {
+            return json({ id: 101, node_id: "PRR_101" });
+          }
+          throw new Error(`Unexpected GitHub request: ${method} ${url.pathname}`);
+        },
+      },
+    });
+
+    expect(
+      publishReview({ context: context(), octokit, report: report() }),
+    ).rejects.toThrow("native thread creation failed");
+    expect(
+      requests.some(
+        (request) =>
+          request.method === "DELETE" &&
+          request.path.endsWith("/pulls/7/reviews/101"),
+      ),
+    ).toBeTrue();
+    expect(
+      requests.some(
+        (request) =>
+          request.method === "POST" &&
+          request.path.endsWith("/pulls/7/reviews/101/events"),
+      ),
+    ).toBeFalse();
   });
 });
