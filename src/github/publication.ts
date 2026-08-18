@@ -1,4 +1,5 @@
 import type { Octokit } from "@octokit/rest";
+import type { ReviewConfig } from "../config/review-config";
 import { encodeReviewState, type ReviewState } from "./review-state";
 import type { TrustedGitHubContext } from "./trusted-context";
 import type { ReviewFinding, ReviewReport } from "../review/findings";
@@ -8,12 +9,22 @@ import {
 } from "../review/effective-patch";
 import {
   findingBody,
+  publishedFindings,
   reviewFindingCountSummary,
 } from "./review-presentation";
+import {
+  validateCommenterPresentation,
+  type CommenterFindingPresentation,
+  type CommenterPresentation,
+} from "./commenter-presentation";
+import { reviewAxes, type ReviewAxis } from "../review/axes";
 
 export { findingBody } from "./review-presentation";
 
 export const checkName = "known-good-review";
+export function axisCheckName(axis: ReviewAxis): string {
+  return `${checkName} / ${axis}`;
+}
 const findingMarkerPrefix = "known-good-review:finding:";
 
 export type ActiveReviewIdentity =
@@ -72,23 +83,62 @@ const addReviewThreadMutation = `
   }
 `;
 
+const reviewThreadsQuery = `
+  query KnownGoodReviewThreads(
+    $owner: String!
+    $repo: String!
+    $number: Int!
+    $after: String
+  ) {
+    repository(owner: $owner, name: $repo) {
+      pullRequest(number: $number) {
+        reviewThreads(first: 100, after: $after) {
+          nodes {
+            id
+            isResolved
+            comments(first: 100) {
+              nodes {
+                databaseId
+                body
+              }
+            }
+          }
+          pageInfo {
+            endCursor
+            hasNextPage
+          }
+        }
+      }
+    }
+  }
+`;
+
+const resolveReviewThreadMutation = `
+  mutation KnownGoodReviewResolveThread($threadId: ID!) {
+    resolveReviewThread(input: { threadId: $threadId }) {
+      thread {
+        id
+        isResolved
+      }
+    }
+  }
+`;
+
 type OctokitClient = Octokit;
 
-function inactiveFindingBody(id: string): string {
+function resolutionReplyBody(
+  id: string,
+  headSha: string,
+  reason: "fixed" | "moved" | "not-published",
+): string {
+  const message = reason === "fixed"
+    ? "✅ Fixed in the current review."
+    : reason === "moved"
+      ? "↪️ This finding moved to a new inline location in the current review."
+      : "✅ This finding is no longer published by the current review profile.";
   return [
-    `<!-- ${findingMarkerPrefix}${id} -->`,
-    "### ✅ No longer active",
-    "",
-    "The current known-good-review result no longer reports this finding.",
-  ].join("\n");
-}
-
-function retiredFindingBody(id: string): string {
-  return [
-    `<!-- known-good-review:retired-finding:${id} -->`,
-    "### ↪️ Finding moved",
-    "",
-    "The current finding is attached to its updated code location.",
+    `<!-- known-good-review:resolution:${id}:${headSha}:${reason} -->`,
+    message,
   ].join("\n");
 }
 
@@ -112,22 +162,39 @@ function inactiveTimelineFindingBody(id: string): string {
 
 function markerId(body: string | null | undefined): string | null {
   const match = body?.match(
-    /<!-- known-good-review:finding:(CR-[1-9]\d*) -->/,
+    /<!-- known-good-review:(?:finding|retired-finding):(CR-[1-9]\d*) -->/,
   );
   return match?.[1] ?? null;
 }
 
-function conclusionFor(report: ReviewReport): "failure" | "neutral" | "success" {
-  if (report.verdict === "REQUEST_CHANGES") return "failure";
-  if (report.verdict === "APPROVE_WITH_IMPROVEMENTS") return "neutral";
+function hasBlockingFinding(report: ReviewReport): boolean {
+  return report.findings.some(
+    (finding) =>
+      finding.status !== "fixed" &&
+      (finding.severity === "BLOCKING" || finding.severity === "IMPORTANT"),
+  );
+}
+
+function conclusionFor(
+  report: ReviewReport,
+  config: Pick<ReviewConfig, "blocking">,
+): "failure" | "neutral" | "success" {
+  if (config.blocking && hasBlockingFinding(report)) return "failure";
+  if (report.findings.some((finding) => finding.status !== "fixed")) return "neutral";
   return "success";
 }
 
-function checkSummary(report: ReviewReport): string {
+function checkSummary(
+  report: ReviewReport,
+  config: Pick<ReviewConfig, "blocking" | "profile">,
+): string {
+  const published = publishedFindings(report, config.profile);
+  const active = report.findings.filter((finding) => finding.status !== "fixed");
   return [
-    `Verdict: **${report.verdict.replaceAll("_", " ")}**`,
+    `Policy result: **${config.blocking && hasBlockingFinding(report) ? "CHANGES REQUESTED" : "REVIEW COMPLETE"}**`,
     "",
-    reviewFindingCountSummary(report),
+    reviewFindingCountSummary(report, config.profile),
+    `Published inline: **${published.length} of ${active.length} active findings**`,
     "",
     `Reviewed ${report.scope.base}…${report.scope.head} with ${report.coverage.activeAxes.join(", ")}.`,
     ...report.limitations.length > 0
@@ -139,16 +206,17 @@ function checkSummary(report: ReviewReport): string {
 async function latestCheck(
   octokit: OctokitClient,
   context: Omit<TrustedGitHubContext, "patchFingerprint">,
+  name = checkName,
 ) {
   const listed = await octokit.rest.checks.listForRef({
     owner: context.owner,
     repo: context.repo,
     ref: context.headSha,
-    check_name: checkName,
+    check_name: name,
     per_page: 100,
   });
   return [...listed.data.check_runs]
-    .filter((check) => check.name === checkName)
+    .filter((check) => check.name === name)
     .sort((left, right) => right.id - left.id)[0];
 }
 
@@ -156,6 +224,8 @@ async function upsertCheck(
   octokit: OctokitClient,
   context: TrustedGitHubContext,
   report: ReviewReport,
+  config: Pick<ReviewConfig, "blocking" | "profile">,
+  forcedConclusion?: "action_required",
 ) {
   const existing = await latestCheck(octokit, context);
   const common = {
@@ -163,11 +233,15 @@ async function upsertCheck(
     repo: context.repo,
     name: checkName,
     status: "completed" as const,
-    conclusion: conclusionFor(report),
+    conclusion: forcedConclusion ?? conclusionFor(report, config),
     completed_at: new Date().toISOString(),
     output: {
-      title: `known-good-review: ${report.verdict.replaceAll("_", " ")}`,
-      summary: checkSummary(report).slice(0, 65_535),
+      title: forcedConclusion === "action_required"
+        ? "known-good-review: review incomplete"
+        : config.blocking && hasBlockingFinding(report)
+        ? "known-good-review: changes requested"
+        : "known-good-review: review complete",
+      summary: checkSummary(report, config).slice(0, 65_535),
     },
   };
   if (existing) {
@@ -191,6 +265,8 @@ export async function publishInProgressCheck(input: {
   readonly context: Omit<TrustedGitHubContext, "patchFingerprint">;
   readonly octokit: OctokitClient;
   readonly review: ActiveReviewIdentity;
+  readonly activeAxes?: readonly ReviewAxis[];
+  readonly skippedAxes?: readonly ReviewAxis[];
 }): Promise<string> {
   const existing = await latestCheck(input.octokit, input.context);
   const common = {
@@ -218,9 +294,111 @@ export async function publishInProgressCheck(input: {
           head_sha: input.context.headSha,
         })
       ).data;
+  await Promise.all([
+    ...(input.activeAxes ?? []).map((axis) =>
+      upsertAxisCheck({
+        axis,
+        conclusion: null,
+        context: input.context,
+        octokit: input.octokit,
+        summary: "This review axis is running.",
+      }),
+    ),
+    ...(input.skippedAxes ?? []).map((axis) =>
+      upsertAxisCheck({
+        axis,
+        conclusion: "skipped",
+        context: input.context,
+        octokit: input.octokit,
+        summary: "This conditional review axis does not apply to the current change.",
+      }),
+    ),
+  ]);
   return (
     check.html_url ??
     `https://github.com/${input.context.repository}/pull/${input.context.pullRequest}/checks`
+  );
+}
+
+async function upsertAxisCheck(input: {
+  readonly axis: ReviewAxis;
+  readonly conclusion: "action_required" | "skipped" | "success" | null;
+  readonly context: Omit<TrustedGitHubContext, "patchFingerprint">;
+  readonly octokit: OctokitClient;
+  readonly summary: string;
+}): Promise<void> {
+  const name = axisCheckName(input.axis);
+  const existing = await latestCheck(input.octokit, input.context, name);
+  const completed = input.conclusion !== null;
+  if (existing?.status === "completed" && completed) {
+    return;
+  }
+  const common = {
+    owner: input.context.owner,
+    repo: input.context.repo,
+    name,
+    status: completed ? ("completed" as const) : ("in_progress" as const),
+    ...(completed
+      ? {
+          conclusion: input.conclusion,
+          completed_at: new Date().toISOString(),
+        }
+      : { started_at: new Date().toISOString() }),
+    output: {
+      title: `${input.axis}: ${completed ? input.conclusion?.replaceAll("_", " ") : "in progress"}`,
+      summary: input.summary,
+    },
+  };
+  if (existing && existing.status !== "completed") {
+    await input.octokit.rest.checks.update({
+      ...common,
+      check_run_id: existing.id,
+    });
+    return;
+  }
+  await input.octokit.rest.checks.create({
+    ...common,
+    head_sha: input.context.headSha,
+    external_id: `${name}:${input.context.pullRequest}:${input.context.headSha}`,
+  });
+}
+
+export async function publishAxisCheckpoint(input: {
+  readonly axis: ReviewAxis;
+  readonly context: Omit<TrustedGitHubContext, "patchFingerprint">;
+  readonly octokit: OctokitClient;
+  readonly status: "complete" | "in-progress";
+}): Promise<void> {
+  await upsertAxisCheck({
+    axis: input.axis,
+    conclusion: input.status === "complete" ? "success" : null,
+    context: input.context,
+    octokit: input.octokit,
+    summary:
+      input.status === "complete"
+        ? "This review axis completed its evidence coverage. Findings are summarized by the aggregate review."
+        : "This review axis saved progress and is continuing in a fresh context.",
+  });
+}
+
+async function completeAxisChecks(
+  octokit: OctokitClient,
+  context: TrustedGitHubContext,
+  report: ReviewReport,
+): Promise<void> {
+  const active = new Set(report.coverage.activeAxes);
+  await Promise.all(
+    reviewAxes.map((axis) =>
+      upsertAxisCheck({
+        axis,
+        conclusion: active.has(axis) ? "success" : "skipped",
+        context,
+        octokit,
+        summary: active.has(axis)
+          ? "This review axis completed its evidence coverage. Findings are summarized by the aggregate review."
+          : "This conditional review axis did not run for the current change.",
+      }),
+    ),
   );
 }
 
@@ -346,8 +524,10 @@ async function createReviewThreads(
   octokit: OctokitClient,
   context: TrustedGitHubContext,
   threads: readonly NewReviewThread[],
+  report: ReviewReport,
+  config: Pick<ReviewConfig, "blocking" | "profile">,
 ): Promise<void> {
-  if (threads.length === 0) return;
+  if (threads.length === 0 && !config.blocking) return;
   await deleteViewerPendingReviews(octokit, context);
   const created = await octokit.rest.pulls.createReview({
     owner: context.owner,
@@ -377,12 +557,20 @@ async function createReviewThreads(
         },
       });
     }
+    const event = config.blocking
+      ? hasBlockingFinding(report)
+        ? "REQUEST_CHANGES" as const
+        : "APPROVE" as const
+      : "COMMENT" as const;
     await octokit.rest.pulls.submitReview({
       owner: context.owner,
       repo: context.repo,
       pull_number: context.pullRequest,
       review_id: created.data.id,
-      event: "COMMENT",
+      event,
+      ...(event === "APPROVE"
+        ? {}
+        : { body: checkSummary(report, config).slice(0, 65_535) }),
     });
   } catch (error) {
     try {
@@ -402,10 +590,106 @@ async function createReviewThreads(
   }
 }
 
+interface ReviewThreadIdentity {
+  readonly commentIds: readonly number[];
+  readonly id: string;
+  readonly isResolved: boolean;
+}
+
+async function reviewThreadIdentities(
+  octokit: OctokitClient,
+  context: TrustedGitHubContext,
+): Promise<ReviewThreadIdentity[]> {
+  const threads: ReviewThreadIdentity[] = [];
+  let after: string | null = null;
+  for (;;) {
+    const response: {
+      repository: {
+        pullRequest: {
+          reviewThreads: {
+            nodes: Array<{
+              id: string;
+              isResolved: boolean;
+              comments: { nodes: Array<{ databaseId: number | null; body: string }> };
+            }>;
+            pageInfo: { endCursor: string | null; hasNextPage: boolean };
+          };
+        };
+      };
+    } = await octokit.graphql(reviewThreadsQuery, {
+      owner: context.owner,
+      repo: context.repo,
+      number: context.pullRequest,
+      after,
+    });
+    const connection: {
+      nodes: Array<{
+        id: string;
+        isResolved: boolean;
+        comments: { nodes: Array<{ databaseId: number | null; body: string }> };
+      }>;
+      pageInfo: { endCursor: string | null; hasNextPage: boolean };
+    } = response.repository.pullRequest.reviewThreads;
+    threads.push(
+      ...connection.nodes.map((thread) => ({
+        id: thread.id,
+        isResolved: thread.isResolved,
+        commentIds: thread.comments.nodes.flatMap((comment) =>
+          comment.databaseId === null ? [] : [comment.databaseId],
+        ),
+      })),
+    );
+    if (!connection.pageInfo.hasNextPage) return threads;
+    after = connection.pageInfo.endCursor;
+    if (!after) throw new Error("GitHub review-thread pagination lost its cursor");
+  }
+}
+
+async function replyAndResolveFinding(
+  octokit: OctokitClient,
+  context: TrustedGitHubContext,
+  comments: readonly { readonly body?: string | null; readonly id: number; readonly in_reply_to_id?: number | null }[],
+  roots: readonly { readonly body?: string | null; readonly id: number }[],
+  id: string,
+  reason: "fixed" | "moved" | "not-published",
+  threads: readonly ReviewThreadIdentity[],
+): Promise<void> {
+  const body = resolutionReplyBody(id, context.headSha, reason);
+  const rootIds = new Set(roots.map((root) => root.id));
+  const alreadyReplied = comments.some(
+    (comment) =>
+      comment.in_reply_to_id !== null &&
+      comment.in_reply_to_id !== undefined &&
+      rootIds.has(comment.in_reply_to_id) &&
+      comment.body?.includes(`known-good-review:resolution:${id}:${context.headSha}:${reason}`),
+  );
+  const target = reason === "fixed" ? roots[0] : roots.at(-1);
+  if (target && !alreadyReplied) {
+    await octokit.rest.pulls.createReplyForReviewComment({
+      owner: context.owner,
+      repo: context.repo,
+      pull_number: context.pullRequest,
+      comment_id: target.id,
+      body,
+    });
+  }
+  for (const thread of threads) {
+    if (
+      thread.isResolved ||
+      !thread.commentIds.some((commentId) => rootIds.has(commentId))
+    ) {
+      continue;
+    }
+    await octokit.graphql(resolveReviewThreadMutation, { threadId: thread.id });
+  }
+}
+
 async function reconcileFindingComments(
   octokit: OctokitClient,
   context: TrustedGitHubContext,
-  findings: readonly ReviewFinding[],
+  report: ReviewReport,
+  config: Pick<ReviewConfig, "blocking" | "profile">,
+  presentation: CommenterPresentation | null,
   files: readonly PullRequestFileForComment[],
 ): Promise<void> {
   const comments = await octokit.paginate(octokit.rest.pulls.listReviewComments, {
@@ -414,18 +698,33 @@ async function reconcileFindingComments(
     pull_number: context.pullRequest,
     per_page: 100,
   });
+  const rootsById = new Map<string, typeof comments>();
+  for (const comment of comments) {
+    if (comment.in_reply_to_id !== null && comment.in_reply_to_id !== undefined) continue;
+    const id = markerId(comment.body);
+    if (!id) continue;
+    rootsById.set(id, [...(rootsById.get(id) ?? []), comment]);
+  }
   const existing = new Map(
-    comments.flatMap((comment) => {
-      const id = markerId(comment.body);
-      return id ? [[id, comment] as const] : [];
+    [...rootsById].flatMap(([id, roots]) => {
+      const newest = roots.at(-1);
+      return newest ? [[id, newest] as const] : [];
     }),
   );
+  const findings = publishedFindings(report, config.profile);
   const active = new Set(findings.map((finding) => finding.id));
+  const presentationById = new Map(
+    presentation?.findings.map((finding) => [finding.id, finding] as const) ?? [],
+  );
   const newThreads: NewReviewThread[] = [];
 
   for (const finding of findings) {
     const location = reviewCommentLocation(finding, files);
-    const body = findingBody(finding, location.subjectType);
+    const body = findingBody(
+      finding,
+      location.subjectType,
+      presentationById.get(finding.id),
+    );
     const prior = existing.get(finding.id);
     if (prior && sameCommentLocation(prior, finding, location)) {
       if (prior.body !== body) {
@@ -438,32 +737,68 @@ async function reconcileFindingComments(
       }
     } else {
       if (prior) {
-        await octokit.rest.pulls.updateReviewComment({
-          owner: context.owner,
-          repo: context.repo,
-          comment_id: prior.id,
-          body: retiredFindingBody(finding.id),
-        });
+        const threads = await reviewThreadIdentities(octokit, context);
+        await replyAndResolveFinding(
+          octokit,
+          context,
+          comments,
+          rootsById.get(finding.id) ?? [],
+          finding.id,
+          "moved",
+          threads,
+        );
       }
       newThreads.push({ body, finding, location });
     }
   }
 
-  await createReviewThreads(octokit, context, newThreads);
+  await createReviewThreads(octokit, context, newThreads, report, config);
 
-  for (const [id, prior] of existing) {
+  const inactiveIds = [...existing.keys()].filter((id) => !active.has(id));
+  const threadIdentities = inactiveIds.length > 0
+    ? await reviewThreadIdentities(octokit, context)
+    : [];
+  const canonicalById = new Map(report.findings.map((finding) => [finding.id, finding]));
+  for (const [id] of existing) {
     if (!active.has(id)) {
-      const body = inactiveFindingBody(id);
-      if (prior.body !== body) {
-        await octokit.rest.pulls.updateReviewComment({
-          owner: context.owner,
-          repo: context.repo,
-          comment_id: prior.id,
-          body,
-        });
-      }
+      const finding = canonicalById.get(id);
+      await replyAndResolveFinding(
+        octokit,
+        context,
+        comments,
+        rootsById.get(id) ?? [],
+        id,
+        finding?.status === "fixed" ? "fixed" : "not-published",
+        threadIdentities,
+      );
     }
   }
+}
+
+async function failRunningAxisChecks(
+  octokit: OctokitClient,
+  context: Omit<TrustedGitHubContext, "patchFingerprint">,
+  message: string,
+): Promise<void> {
+  await Promise.all(
+    reviewAxes.map(async (axis) => {
+      const existing = await latestCheck(octokit, context, axisCheckName(axis));
+      if (!existing || existing.status === "completed") return;
+      await octokit.rest.checks.update({
+        owner: context.owner,
+        repo: context.repo,
+        check_run_id: existing.id,
+        name: axisCheckName(axis),
+        status: "completed",
+        conclusion: "action_required",
+        completed_at: new Date().toISOString(),
+        output: {
+          title: `${axis}: incomplete`,
+          summary: message,
+        },
+      });
+    }),
+  );
 }
 
 async function retireTimelineFindingComments(
@@ -533,8 +868,11 @@ export async function writeReviewState(
 }
 
 export async function publishReview(input: {
+  readonly config?: Pick<ReviewConfig, "blocking" | "profile">;
   readonly context: TrustedGitHubContext;
   readonly octokit: OctokitClient;
+  readonly presentation?: CommenterPresentation | null;
+  readonly reconcileFindings?: boolean;
   readonly report: ReviewReport;
 }): Promise<{ readonly checkUrl: string; readonly findingCount: number }> {
   if (input.report.scope.head !== input.context.headSha) {
@@ -542,6 +880,10 @@ export async function publishReview(input: {
       `Refusing to publish report for ${input.report.scope.head}; trusted head is ${input.context.headSha}`,
     );
   }
+  const config = input.config ?? { blocking: false, profile: "balanced" as const };
+  const presentation = input.presentation
+    ? validateCommenterPresentation(input.report, input.presentation)
+    : null;
   const changed = await input.octokit.paginate(
     input.octokit.rest.pulls.listFiles,
     {
@@ -551,18 +893,36 @@ export async function publishReview(input: {
       per_page: 100,
     },
   );
-  await reconcileFindingComments(
+  if (input.reconcileFindings ?? true) {
+    await reconcileFindingComments(
+      input.octokit,
+      input.context,
+      input.report,
+      config,
+      presentation,
+      changed,
+    );
+    await retireTimelineFindingComments(
+      input.octokit,
+      input.context,
+      publishedFindings(input.report, config.profile),
+    );
+  } else if (config.blocking) {
+    await createReviewThreads(
+      input.octokit,
+      input.context,
+      [],
+      input.report,
+      config,
+    );
+  }
+  await completeAxisChecks(input.octokit, input.context, input.report);
+  const check = await upsertCheck(
     input.octokit,
     input.context,
-    input.report.findings,
-    changed,
+    input.report,
+    config,
   );
-  await retireTimelineFindingComments(
-    input.octokit,
-    input.context,
-    input.report.findings,
-  );
-  const check = await upsertCheck(input.octokit, input.context, input.report);
   const checkUrl =
     check.html_url ??
     `https://github.com/${input.context.repository}/pull/${input.context.pullRequest}/checks`;
@@ -594,6 +954,7 @@ export async function publishReview(input: {
     app: checkName,
     pullRequest: input.context.pullRequest,
     initialFullStatus: "completed",
+    publication: config,
     baseline: {
       head: input.context.headSha,
       patchFingerprint:
@@ -607,7 +968,10 @@ export async function publishReview(input: {
     },
     updatedAt: new Date().toISOString(),
   });
-  return { checkUrl, findingCount: input.report.findings.length };
+  return {
+    checkUrl,
+    findingCount: publishedFindings(input.report, config.profile).length,
+  };
 }
 
 export async function publishFailClosedCheck(input: {
@@ -615,6 +979,7 @@ export async function publishFailClosedCheck(input: {
   readonly message: string;
   readonly octokit: OctokitClient;
 }): Promise<string> {
+  await failRunningAxisChecks(input.octokit, input.context, input.message);
   const existing = await latestCheck(input.octokit, input.context);
   if (existing?.conclusion === "action_required") {
     return (
@@ -645,7 +1010,13 @@ export async function publishFailClosedCheck(input: {
     verifiedClaims: [],
     limitations: [input.message],
   };
-  const check = await upsertCheck(input.octokit, input.context, report);
+  const check = await upsertCheck(
+    input.octokit,
+    input.context,
+    report,
+    { blocking: true, profile: "balanced" },
+    "action_required",
+  );
   return (
     check.html_url ??
     `https://github.com/${input.context.repository}/pull/${input.context.pullRequest}/checks`
@@ -660,6 +1031,11 @@ export async function publishBudgetExhaustedCheck(input: {
   readonly limit: number;
   readonly octokit: OctokitClient;
 }): Promise<string> {
+  await failRunningAxisChecks(
+    input.octokit,
+    input.context,
+    `This review axis did not complete because the ${input.budgetAxis} token budget was exhausted.`,
+  );
   const existing = await latestCheck(input.octokit, input.context);
   const common = {
     owner: input.context.owner,

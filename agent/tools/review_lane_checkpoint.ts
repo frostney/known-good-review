@@ -13,6 +13,8 @@ import {
   readReviewEvidenceManifest,
   readReviewEvidenceProgress,
 } from "../../src/review/evidence-bundle";
+import { githubAdapter } from "../../src/github/chat-adapter";
+import { publishAxisCheckpoint } from "../../src/github/publication";
 
 export const reviewLaneCheckpointInputSchema = z
   .object({
@@ -84,15 +86,22 @@ export default defineTool({
       input.axis,
     );
     validateLaneCheckpointEvidenceProgress(input.checkpoint, progress);
+    const checkpoint = await writeLaneCheckpoint(
+      sandbox,
+      identity,
+      input.axis,
+      input.checkpoint,
+      manifest.entries.length,
+    );
+    await publishAxisCheckpoint({
+      axis: input.axis,
+      context: trusted,
+      octokit: githubAdapter(trusted.installationId).octokit,
+      status: checkpoint.status,
+    });
     return {
       operation: "write" as const,
-      checkpoint: await writeLaneCheckpoint(
-        sandbox,
-        identity,
-        input.axis,
-        input.checkpoint,
-        manifest.entries.length,
-      ),
+      checkpoint,
     };
   },
   toModelOutput(output) {

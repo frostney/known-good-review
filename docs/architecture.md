@@ -10,13 +10,13 @@ flowchart LR
   GI --> MD["Installation memory deletion"]
   EC --> LC["Deterministic lifecycle and trusted config"]
   LC --> ER["Eve coordinator"]
-  ER --> WF["Workflow axis and finding subagents"]
+  ER --> WF["Workflow axes, scouts, and commenter"]
   ER --> VS["Persistent Vercel Sandbox"]
   ER --> AG["Vercel AI Gateway"]
   ER --> CM["Convex RAG memory"]
   MD --> CM
   ER --> CS["Chat SDK GitHub adapter"]
-  CS --> CR["One Check Run, result summary, and inline findings"]
+  CS --> CR["Aggregate and axis Checks, result summary, and inline findings"]
   CR --> GH
 ```
 
@@ -54,7 +54,8 @@ head, an Eve `action.result` hook prepares the classified patch once in the
 shared sandbox without putting preparation commands or raw patches in model
 history. Lanes page an integrity-checked manifest and bounded patch chunks
 instead of independently reconstructing the diff.
-Child routing envelopes contain an exact skill axis or the `revalidation` role.
+Child routing envelopes contain an exact skill axis or the `revalidation`,
+`scout`, or `commenter` role.
 Dynamic model routing maps these roles directly to trusted `agents`
 configuration.
 
@@ -77,6 +78,13 @@ subagent that reconciles that packet with the immutable manifest, without
 inheriting the prior model history. This reuses the checkpoint-and-reconcile
 semantics of Milestone Rush; it does not introduce another workflow runtime or
 state service.
+
+When a lane needs bounded related-source, history, rendered-page, or web
+evidence, the coordinator starts a fresh routed scout and passes its compact
+evidence to the next fresh lane. After all axis reports reconcile, one fresh
+commenter converts canonical text into exact-copy text/code segments. The app
+validates that no fact changed, renders code identifiers with inline code, and
+then publishes once.
 
 Eve compacts a lane at 25 percent of the selected model's context window. The
 percentage adapts to arbitrary Gateway models while leaving enough room for a
@@ -115,9 +123,10 @@ application record behind the in-flight-ingestion barrier.
 
 ## State and publication
 
-An accepted model-backed review creates or updates an active current-head Check
-Run as `in_progress`. A rerun after completion creates a fresh same-name Check
-Run because a completed run is terminal. Manual comment triggers receive an
+An accepted model-backed review creates or updates an active current-head
+aggregate Check and one Check per active axis as `in_progress`; conditional
+axes are `skipped`. A rerun after completion creates fresh same-name Checks
+because a completed run is terminal. Manual comment triggers receive an
 eyes reaction from the webhook handler while it still owns the exact triggering
 comment. Completion moves the active Check Run to its final verdict.
 
@@ -125,9 +134,10 @@ Every successful publication also updates one visible PR summary containing the
 result and a hidden canonical state schema v2 artifact, baseline head,
 whole-patch fingerprint, and per-file fingerprints. Findings use native inline
 review threads at their exact diff locations. Stable hidden `CR-N` markers own
-reconciliation without exposing internal IDs. Findings absent from the current
-canonical result are marked inactive. Check lookup is scoped to the current
-head and the fixed name `known-good-review`.
+reconciliation without exposing internal IDs. A fixed finding receives one
+reply on its original inline thread, which is then resolved; it is never
+reposted. Check lookup is scoped to the current head and fixed aggregate and
+axis names.
 
 The state artifact is size-bounded to GitHub's comment limit. Oversize or
 invalid output fails before advancing the baseline. A completed or failed Eve

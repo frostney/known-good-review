@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const findingSchema = z.object({
   id: z.string().regex(/^CR-[1-9]\d*$/),
-  severity: z.enum(["BLOCKING", "IMPORTANT", "IMPROVEMENT"]),
+  severity: z.enum(["BLOCKING", "IMPORTANT", "IMPROVEMENT", "NITPICK"]),
   status: z.enum(["open", "fixed", "deferred"]),
   location: z.object({
     path: z.string().min(1),
@@ -22,7 +22,10 @@ export function findingsToRevalidate(
     if (finding.status === "fixed") {
       return false;
     }
-    if (finding.severity !== "IMPROVEMENT") {
+    if (
+      finding.severity !== "IMPROVEMENT" &&
+      finding.severity !== "NITPICK"
+    ) {
       return true;
     }
     return (

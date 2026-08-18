@@ -13,12 +13,16 @@ import {
 } from "../../src/memory/client";
 import { routingAttribute } from "../../src/models/routing";
 import { reviewReportSchema } from "../../src/review/findings";
+import { commenterPresentationSchema } from "../../src/github/commenter-presentation";
 
 export default defineTool({
   description:
     "Validate and publish the final code-review v2 report to the known-good-review Check Run, visible result summary, and stable inline finding threads. Repository, pull request, and head are taken only from trusted GitHub context.",
-  inputSchema: z.object({ report: reviewReportSchema }),
-  async execute({ report }, ctx) {
+  inputSchema: z.object({
+    presentation: commenterPresentationSchema,
+    report: reviewReportSchema,
+  }),
+  async execute({ presentation, report }, ctx) {
     if (ctx.session.parent) {
       throw new Error("Only the review coordinator can publish a review");
     }
@@ -37,15 +41,17 @@ export default defineTool({
     if (parsedPlan?.kind !== "full" && parsedPlan?.kind !== "delta") {
       throw new Error("Published review is missing a trusted review kind");
     }
-    const publication = await publishReview({
-      context: trusted,
-      octokit: githubAdapter(trusted.installationId).octokit,
-      report,
-    });
     const rawConfig = attributes[routingAttribute];
     const config = parseReviewConfig(
       typeof rawConfig === "string" ? rawConfig : null,
     );
+    const publication = await publishReview({
+      config,
+      context: trusted,
+      octokit: githubAdapter(trusted.installationId).octokit,
+      presentation,
+      report,
+    });
     const memory = await enqueueReviewMemory(
       normalizedReviewMemory({
         config,

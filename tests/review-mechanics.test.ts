@@ -145,10 +145,27 @@ describe("review mechanics", () => {
           status: "fixed",
           location: { path: "src/e.ts", line: 5, symbol: null },
         },
+        {
+          id: "CR-6",
+          severity: "NITPICK",
+          status: "open",
+          location: { path: "src/f.ts", line: 6, symbol: "changed" },
+        },
+        {
+          id: "CR-7",
+          severity: "NITPICK",
+          status: "open",
+          location: { path: "src/g.ts", line: 7, symbol: "unrelated" },
+        },
       ],
       new Set(["src/other.ts"]),
       new Set(["changed"]),
     );
-    expect(selected.map(({ id }) => id)).toEqual(["CR-1", "CR-2", "CR-3"]);
+    expect(selected.map(({ id }) => id)).toEqual([
+      "CR-1",
+      "CR-2",
+      "CR-3",
+      "CR-6",
+    ]);
   });
 });

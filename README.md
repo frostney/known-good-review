@@ -3,12 +3,9 @@
 `known-good-review` is a review-only GitHub App built as a standalone Eve
 application. It runs on Vercel, uses Vercel AI Gateway for models, inspects pull
 requests inside Vercel Sandbox, receives GitHub App events through Eve's native
-GitHub channel, and publishes one Check Run, one visible result summary, and
-stable inline finding threads through the official Chat SDK GitHub adapter's
-typed Octokit surface.
-
-This repository is a local scaffold. No GitHub App, Vercel project, Connect
-connector, deployment, package, or other external resource has been created.
+GitHub channel, and publishes aggregate and per-axis Checks, one visible result
+summary, and stable inline finding threads through the official Chat SDK GitHub
+adapter's typed Octokit surface.
 
 ## Lifecycle
 
@@ -34,8 +31,8 @@ flowchart TD
 - New commits during the debounce reset it. A new event steers and cancels
   stale active Eve work.
 - After the first successful full review, only semantic delta files are freshly
-  reviewed. Every open Blocking/Important finding and relevant Improvement is
-  revalidated; other Improvements are carried forward.
+  reviewed. Every open Blocking/Important finding and relevant Improvement or
+  Nitpick is revalidated; other presentation-only findings are carried forward.
 - Merge and rebase SHA churn is compared by normalized effective patch. A
   semantic no-op does not call a model and does not start another review; it
   only creates or updates the required Check on the current head.
@@ -61,6 +58,8 @@ Unknown keys or models fail closed.
 ```yaml
 model: openai/gpt-5.6-sol
 agents: moonshotai/kimi-k3
+profile: balanced
+blocking: false
 embedding: voyage/voyage-4
 embeddingDimension: 1024
 publicRoots:
@@ -77,7 +76,8 @@ Any currently listed AI Gateway language model with tool use is accepted;
 there is no model allowlist. Comma-separated IDs form an ordered fallback
 chain. `agents` is optional: a string applies one chain to every subagent,
 while a mapping can override exact `code-review` axes without creating a
-second lane system:
+second lane system. `scout` and `commenter` default to
+`openai/gpt-5.6-luna` with xhigh reasoning and can be overridden like the axes:
 
 ```yaml
 model: openai/gpt-5.6-sol, anthropic/claude-opus-5
@@ -86,7 +86,19 @@ agents:
   claim-and-specification: anthropic/claude-opus-5
   engineering-quality: openai/gpt-5.6-sol
   discoverability: moonshotai/kimi-k3
+  scout: openai/gpt-5.6-luna
+  commenter: openai/gpt-5.6-luna
 ```
+
+`profile` changes inline publication volume without changing review depth or
+the canonical report. `focused` publishes Blocking and Important findings,
+`balanced` also publishes Improvements, and `thorough` also publishes
+Nitpicks. The default is `balanced`. Hidden Nitpicks remain visible in counts,
+revalidation, telemetry, and repository memory.
+
+Reviews are non-blocking by default. Set `blocking: true` to submit GitHub
+`REQUEST_CHANGES` when an open Blocking or Important finding exists and
+`APPROVE` otherwise. Improvements and Nitpicks never block.
 
 `embedding` accepts any currently listed AI Gateway embedding model.
 `embeddingDimension` must match that model's default output and one of Convex
@@ -104,6 +116,12 @@ The coordinator and each invocation use one successful model. AI Gateway tries
 only the explicitly listed fallbacks when the primary fails. Revalidation uses
 the scalar `agents` chain when present; a per-axis map leaves revalidation on
 the coordinator chain.
+
+Each active review axis receives its own Check Run. Axis Checks report
+execution health only: in progress while working, success after complete
+evidence coverage, skipped when a conditional axis does not apply, and
+action-required when an active axis cannot complete. The aggregate Check owns
+the configured blocking policy.
 
 ## Local development
 
@@ -133,11 +151,11 @@ owned by Vercel Sandbox; Eve's public runtime handle deliberately exposes
 `stop()`, not a provider sandbox identifier that application code could safely
 delete.
 
-## External setup not performed by this scaffold
+## External setup
 
-When authorized later, provision the Connect-backed GitHub App with Eve's
-current setup flow, create the Convex deployment, deploy the app to Vercel,
-and install it on selected repositories. Give Convex its AI Gateway key and
+Provision the Connect-backed GitHub App with Eve's current setup flow, create
+the Convex deployment, deploy the app to Vercel, and install it on selected
+repositories. Give Convex its AI Gateway key and
 the shared memory bearer token; give Eve the Convex HTTP-actions URL and the
 same token. The app needs repository metadata read, contents read, pull
 requests read/write, issues read/write, and checks read/write. Forward

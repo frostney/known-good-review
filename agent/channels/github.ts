@@ -37,6 +37,7 @@ import { withTrustedReviewContext } from "../../src/github/trusted-context";
 import { handleGitHubLifecycleWebhook } from "../../src/github/lifecycle";
 import { requestMemoryDeletion } from "../../src/memory/client";
 import { findingsToRevalidate } from "../../src/review/revalidation";
+import type { ReviewAxis } from "../../src/review/axes";
 import { discoverabilityApplies } from "../../src/review/discoverability";
 import { effectivePatchFingerprint } from "../../src/review/effective-patch";
 import { withFreshReviewSessions } from "../../src/github/session-routing";
@@ -420,8 +421,10 @@ async function dispatchReview(input: {
       return null;
     }
     await publishReview({
+      config: reviewConfig,
       context,
       octokit,
+      reconcileFindings: false,
       report: {
         ...dispatch.priorReport,
         generatedAt: new Date().toISOString(),
@@ -442,13 +445,30 @@ async function dispatchReview(input: {
     return null;
   }
 
+  const reviewedPaths = dispatch.plan.kind === "delta"
+    ? dispatch.changedFiles
+    : patchFiles.map((file) => file.path);
+  const activeAxes: ReviewAxis[] = [
+    "deduplication",
+    "claim-and-specification",
+    "engineering-quality",
+  ];
+  if (discoverabilityApplies(reviewedPaths, reviewConfig.publicRoots)) {
+    activeAxes.push("discoverability");
+  }
+  const skippedAxes = activeAxes.includes("discoverability")
+    ? []
+    : ["discoverability" as const];
+
   await publishInProgressCheck({
+    activeAxes,
     context,
     octokit,
     review:
       dispatch.plan.kind === "full"
         ? { kind: dispatch.plan.kind, reason: dispatch.plan.reason }
         : { kind: dispatch.plan.kind },
+    skippedAxes,
   });
 
   if (dispatch.plan.kind === "full" && dispatch.plan.reason === "initial") {
@@ -456,6 +476,7 @@ async function dispatchReview(input: {
       octokit,
       context,
       pendingReviewState({
+        publication: reviewConfig,
         pullRequest: pullRequestNumber,
         status: dispatch.plan.delaySeconds === 600 ? "debouncing" : "running",
       }),
@@ -470,19 +491,7 @@ async function dispatchReview(input: {
     patchFingerprint: dispatch.patchFingerprint,
     exactFiles:
       dispatch.plan.kind === "delta" ? dispatch.changedFiles : undefined,
-    activeAxes: [
-      "deduplication",
-      "claim-and-specification",
-      "engineering-quality",
-      ...(discoverabilityApplies(
-        dispatch.plan.kind === "delta"
-          ? dispatch.changedFiles
-          : patchFiles.map((file) => file.path),
-        reviewConfig.publicRoots,
-      )
-        ? ["discoverability"]
-        : []),
-    ],
+    activeAxes,
     priorFindings:
       dispatch.plan.kind === "delta" && dispatch.priorReport
         ? {

@@ -13,6 +13,8 @@ CLI (`skills` 1.5.22). No skill directory was populated with an ad-hoc file copy
 - Consumed merged revision: `e3aad669dc127e5af6b1fea1ccccf0cc70b0e093`
 - Commit subject: `feat(code-review): define review axes and v2 findings (#38)`
 - Latest checked main revision: `0b54d8adb0b2a827120a954d5905827e51d3236b`
+- Nitpick/profile source pull request: `https://github.com/frostney/known-good-route/pull/40`
+- Nitpick/profile consumed revision: `88b96fc5f8804ac7ebe0bb2c5dfdf20161261ab9`
 
 The local commit clarifies fresh review, targeted revalidation, and combined
 operations; names review axes consistently; requires one lane per active axis;

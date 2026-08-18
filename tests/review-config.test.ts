@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
   defaultEmbedding,
   defaultModels,
+  defaultSpecialistModels,
   modelsForAxis,
+  modelsForSpecialist,
   parseReviewConfig,
 } from "../src/config/review-config";
 
@@ -11,7 +13,12 @@ describe("trusted review configuration", () => {
     const config = parseReviewConfig(null);
     expect(config.model).toEqual(defaultModels);
     expect(config.embedding).toEqual(defaultEmbedding);
+    expect(config.profile).toBe("balanced");
+    expect(config.blocking).toBeFalse();
     expect(modelsForAxis(config, "deduplication")).toEqual(defaultModels);
+    expect(modelsForSpecialist(config, "scout")).toEqual(
+      defaultSpecialistModels,
+    );
   });
 
   test("supports ordered fallbacks and per-axis overrides", () => {
@@ -20,6 +27,10 @@ model: openai/gpt-5.6-sol, anthropic/claude-opus-5
 agents:
   deduplication: moonshotai/kimi-k3, openai/gpt-5.6-sol
   engineering-quality: anthropic/claude-opus-5
+  scout: openai/gpt-5.6-luna
+  commenter: xai/grok-code-fast-1
+profile: thorough
+blocking: true
 `);
 
     expect(config.model).toEqual([
@@ -33,6 +44,14 @@ agents:
     expect(modelsForAxis(config, "claim-and-specification")).toEqual(
       config.model,
     );
+    expect(modelsForSpecialist(config, "scout")).toEqual([
+      "openai/gpt-5.6-luna",
+    ]);
+    expect(modelsForSpecialist(config, "commenter")).toEqual([
+      "xai/grok-code-fast-1",
+    ]);
+    expect(config.profile).toBe("thorough");
+    expect(config.blocking).toBeTrue();
   });
 
   test("supports one scalar chain for all subagents", () => {

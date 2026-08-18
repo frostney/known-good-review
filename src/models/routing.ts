@@ -2,6 +2,7 @@ import type { ModelMessage } from "ai";
 import {
   parseReviewConfig,
   modelsForAxis,
+  modelsForSpecialist,
   type ModelChain,
   type ReviewConfig,
 } from "../config/review-config";
@@ -14,7 +15,8 @@ const routingPattern =
 export type ReviewRoute =
   | { readonly role: "coordinator"; readonly attempt: number }
   | { readonly role: "lane"; readonly axis: ReviewAxis; readonly attempt: number }
-  | { readonly role: "revalidation"; readonly attempt: number };
+  | { readonly role: "revalidation"; readonly attempt: number }
+  | { readonly role: "scout" | "commenter"; readonly attempt: number };
 
 function textFromMessage(message: ModelMessage): string {
   if (typeof message.content === "string") {
@@ -59,7 +61,7 @@ export function parseSubagentRoute(messages: readonly ModelMessage[]): ReviewRou
   }
   const role = parsed.role;
   const attempt = parseAttempt("attempt" in parsed ? parsed.attempt : 0);
-  if (role === "revalidation") {
+  if (role === "revalidation" || role === "scout" || role === "commenter") {
     return { role, attempt };
   }
   if (role === "lane" && "axis" in parsed && typeof parsed.axis === "string") {
@@ -68,7 +70,9 @@ export function parseSubagentRoute(messages: readonly ModelMessage[]): ReviewRou
     }
     return { role, axis: parsed.axis, attempt };
   }
-  throw new Error("Review subagent routing role must be lane or revalidation");
+  throw new Error(
+    "Review subagent routing role must be lane, revalidation, scout, or commenter",
+  );
 }
 
 export function chainForRoute(
@@ -77,6 +81,9 @@ export function chainForRoute(
 ): ModelChain {
   if (route.role === "lane") {
     return modelsForAxis(config, route.axis);
+  }
+  if (route.role === "scout" || route.role === "commenter") {
+    return modelsForSpecialist(config, route.role);
   }
   if (route.role === "revalidation" && config.agents.kind === "all") {
     return config.agents.models;
@@ -98,6 +105,9 @@ export function selectRoutedModel(input: {
         readonly caching: "auto";
         readonly models?: readonly string[];
       };
+      readonly openai?: {
+        readonly reasoningEffort: "xhigh";
+      };
     };
   };
 } {
@@ -118,14 +128,21 @@ export function selectRoutedModel(input: {
     );
   }
   const fallbacks = chain.slice(route.attempt + 1);
+  const gatewayOptions = {
+    caching: "auto" as const,
+    ...(fallbacks.length > 0 ? { models: fallbacks } : {}),
+  };
+  const specialistOpenAi =
+    (route.role === "scout" || route.role === "commenter") &&
+    model.startsWith("openai/");
   return {
     model,
     modelOptions: {
       providerOptions: {
-        gateway: {
-          caching: "auto" as const,
-          ...(fallbacks.length > 0 ? { models: fallbacks } : {}),
-        },
+        gateway: gatewayOptions,
+        ...(specialistOpenAi
+          ? { openai: { reasoningEffort: "xhigh" } }
+          : {}),
       },
     },
   };

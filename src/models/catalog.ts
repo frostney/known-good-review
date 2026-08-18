@@ -1,5 +1,9 @@
 import { z } from "zod";
-import type { ReviewConfig } from "../config/review-config";
+import {
+  modelsForSpecialist,
+  specialistRoles,
+  type ReviewConfig,
+} from "../config/review-config";
 
 const catalogModelSchema = z.object({
   id: z.string(),
@@ -38,6 +42,9 @@ export async function validateConfiguredModels(
 ): Promise<void> {
   const catalog = await gatewayModels();
   const languageModels = new Set(config.model);
+  specialistRoles.forEach((role) =>
+    modelsForSpecialist(config, role).forEach((model) => languageModels.add(model)),
+  );
   if (config.agents.kind === "all") {
     config.agents.models.forEach((model) => languageModels.add(model));
   } else if (config.agents.kind === "axes") {

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { reviewProfiles } from "../config/review-config";
 import { reviewReportSchema } from "../review/findings";
 import {
   reviewProgressBody,
@@ -18,6 +19,12 @@ export const reviewStateSchema = z.object({
     "completed",
     "failed",
   ]),
+  publication: z
+    .object({
+      blocking: z.boolean(),
+      profile: z.enum(reviewProfiles),
+    })
+    .optional(),
   baseline: z
     .object({
       head: z.string().min(1),
@@ -37,7 +44,10 @@ export function encodeReviewState(state: ReviewState): string {
   const json = JSON.stringify(parsed);
   const visible =
     parsed.initialFullStatus === "completed" && parsed.baseline
-      ? reviewResultBody(parsed.baseline.report)
+      ? reviewResultBody(
+          parsed.baseline.report,
+          parsed.publication ?? { blocking: false, profile: "balanced" },
+        )
       : reviewProgressBody(parsed.initialFullStatus);
   return `${visible}\n\n<!-- ${stateMarker}\n${Buffer.from(json).toString("base64url")}\n-->`;
 }
@@ -64,6 +74,7 @@ export function isReviewStateComment(comment: string): boolean {
 }
 
 export function pendingReviewState(input: {
+  readonly publication?: { readonly blocking: boolean; readonly profile: "focused" | "balanced" | "thorough" };
   readonly pullRequest: number;
   readonly status: "debouncing" | "running" | "failed";
 }): ReviewState {
@@ -72,6 +83,7 @@ export function pendingReviewState(input: {
     app: "known-good-review",
     pullRequest: input.pullRequest,
     initialFullStatus: input.status,
+    publication: input.publication ?? { blocking: false, profile: "balanced" },
     baseline: null,
     updatedAt: new Date().toISOString(),
   };

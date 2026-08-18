@@ -19,7 +19,7 @@ const churnSchema = z.object({
 export const reviewFindingSchema = z
   .object({
     id: z.string().regex(/^CR-[1-9]\d*$/),
-    severity: z.enum(["BLOCKING", "IMPORTANT", "IMPROVEMENT"]),
+    severity: z.enum(["BLOCKING", "IMPORTANT", "IMPROVEMENT", "NITPICK"]),
     category: z.enum([
       "CLAIM",
       "QUALITY",
