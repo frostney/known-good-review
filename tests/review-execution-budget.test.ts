@@ -73,7 +73,7 @@ describe("review execution token budget", () => {
         laneCount,
     );
 
-    expect(laneInputGrant).toBe(735_000);
+    expect(laneInputGrant).toBe(1_985_000);
     expect(laneInputGrant).toBeGreaterThan(observedMaximumLaneInputTokens);
   });
 
