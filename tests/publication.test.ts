@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Octokit } from "@octokit/rest";
 import {
   activeReviewExternalId,
+  findingBody,
   parseActiveReviewExternalId,
   publishInProgressCheck,
   publishReview,
@@ -440,6 +441,136 @@ describe("GitHub publication lifecycle", () => {
     ).toBeFalse();
   });
 
+  test("retires an old thread only after the replacement and state artifact are durable", async () => {
+    const requests: CapturedRequest[] = [];
+    const octokit = new Octokit({
+      auth: "test-token",
+      request: {
+        fetch: async (resource: Request | string | URL, init?: RequestInit) => {
+          const url = new URL(String(resource));
+          const method = init?.method ?? "GET";
+          const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+          requests.push({
+            body,
+            headers: new Headers(init?.headers),
+            method,
+            path: url.pathname,
+          });
+          if (method === "GET" && url.pathname.endsWith("/pulls/7/files")) {
+            return json([{
+              filename: "src/review.ts",
+              status: "modified",
+              sha: "blob",
+              patch: "@@ -10,3 +10,3 @@\n context\n-old\n+new\n context",
+            }]);
+          }
+          if (method === "GET" && url.pathname.endsWith("/pulls/7/comments")) {
+            return json([{
+              id: 201,
+              body: "<!-- known-good-review:finding:CR-1 -->\nold finding",
+              path: "src/old.ts",
+              line: 3,
+              side: "RIGHT",
+              subject_type: "line",
+              in_reply_to_id: null,
+            }]);
+          }
+          if (method === "GET" && url.pathname.endsWith("/pulls/7/reviews")) {
+            return json([]);
+          }
+          if (method === "POST" && url.pathname.endsWith("/pulls/7/reviews")) {
+            return json({ id: 101, node_id: "PRR_101" });
+          }
+          if (
+            method === "POST" &&
+            url.pathname.endsWith("/pulls/7/reviews/101/events")
+          ) {
+            return json({ id: 101, state: "COMMENTED" });
+          }
+          if (
+            method === "POST" &&
+            url.pathname.endsWith("/pulls/7/comments/201/replies")
+          ) {
+            return json({ id: 202, body, in_reply_to_id: 201 });
+          }
+          if (method === "POST" && url.pathname === "/graphql") {
+            const operation = graphqlOperation(body);
+            if (operation.includes("KnownGoodReviewThreads")) {
+              return json({
+                data: {
+                  repository: {
+                    pullRequest: {
+                      reviewThreads: {
+                        nodes: [{
+                          id: "PRRT_201",
+                          isResolved: false,
+                          comments: { nodes: [{ databaseId: 201, body: "old finding" }] },
+                        }],
+                        pageInfo: { endCursor: null, hasNextPage: false },
+                      },
+                    },
+                  },
+                },
+              });
+            }
+            if (operation.includes("KnownGoodReviewAddReviewThread")) {
+              return json({
+                data: {
+                  addPullRequestReviewThread: { thread: { id: "PRRT_202" } },
+                },
+              });
+            }
+            if (operation.includes("KnownGoodReviewResolveThread")) {
+              throw new Error("review thread resolution failed");
+            }
+            throw new Error(`Unexpected GraphQL operation: ${operation}`);
+          }
+          if (method === "GET" && url.pathname.endsWith("/check-runs")) {
+            return json({ check_runs: [], total_count: 0 });
+          }
+          if (method === "POST" && url.pathname.endsWith("/check-runs")) {
+            return json({
+              id: requests.length + 300,
+              name: "known-good-review",
+              html_url: "https://github.com/acme/widget/runs/300",
+            });
+          }
+          if (method === "GET" && url.pathname.endsWith("/issues/7/comments")) {
+            return json([]);
+          }
+          if (method === "POST" && url.pathname.endsWith("/issues/7/comments")) {
+            return json({ id: 401, body });
+          }
+          throw new Error(`Unexpected GitHub request: ${method} ${url.pathname}`);
+        },
+      },
+    });
+
+    await publishReview({ context: context(), octokit, report: report() });
+
+    const stateArtifact = requests.findIndex(
+      (request) =>
+        request.method === "POST" &&
+        request.path.endsWith("/issues/7/comments") &&
+        typeof request.body === "object" &&
+        request.body !== null &&
+        "body" in request.body &&
+        typeof request.body.body === "string" &&
+        request.body.body.includes("known-good-review:state"),
+    );
+    const retirementReply = requests.findIndex((request) =>
+      request.path.endsWith("/pulls/7/comments/201/replies"),
+    );
+    expect(stateArtifact).toBeGreaterThan(-1);
+    expect(retirementReply).toBeGreaterThan(stateArtifact);
+    expect(requests[retirementReply]?.body).toMatchObject({
+      body: expect.stringContaining("no longer published"),
+    });
+    expect(requests[retirementReply]?.body).not.toMatchObject({
+      body: expect.stringContaining("moved to a new inline location"),
+    });
+  });
+
   test("replies to and resolves a fixed finding without reposting it", async () => {
     const requests: CapturedRequest[] = [];
     const fixed = report();
@@ -469,7 +600,7 @@ describe("GitHub publication lifecycle", () => {
           if (method === "GET" && url.pathname.endsWith("/pulls/7/comments")) {
             return json([{
               id: 201,
-              body: "<!-- known-good-review:finding:CR-1 -->\noriginal finding",
+              body: findingBody(fixed.findings[0]!),
               path: "src/review.ts",
               line: 11,
               side: "RIGHT",
