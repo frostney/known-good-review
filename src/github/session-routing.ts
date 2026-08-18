@@ -33,10 +33,14 @@ export function withFreshReviewSessions<TState>(
       reset: (options) => current.reset(options),
       respond: (responses, options) => current.respond(responses, options),
       send: async (message, options) => {
-        if (startsFreshReviewSession(options.auth)) {
+        const freshReview = startsFreshReviewSession(options.auth);
+        if (freshReview) {
           await current.reset({ reason: "new review dispatch" });
         }
-        return from(address).send(message, options);
+        return from(address).send(
+          message,
+          freshReview ? { ...options, mode: "task" } : options,
+        );
       },
     };
   };

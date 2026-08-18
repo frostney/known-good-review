@@ -167,7 +167,9 @@ tokens, cache tokens, exact USD cost, generation time, latency, outcome, and
 review kind. Generation lookup failures are visible but do not expose prompts
 or source.
 
-Eve caps a root review session at 8,000,000 input tokens and 512,000 output
-tokens. Exhaustion publishes an `action_required` Check with measured usage and
-the configured cap, publishes no partial verdict, and never retries
-automatically. Input telemetry also evaluates 2M, 3M, 4M, and 6M shadow caps.
+Eve caps a root review session at 2,000,000 input tokens and 64,000 output
+tokens. Fresh full and delta roots run in task mode so the cap cannot be renewed
+through a conversation continuation. Exhaustion publishes an `action_required`
+Check with measured usage and the configured cap, publishes no partial verdict,
+and never retries automatically. Input telemetry also evaluates 2M, 3M, 4M,
+and 6M comparison thresholds during the provisional rollout.
