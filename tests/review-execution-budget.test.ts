@@ -41,7 +41,7 @@ const pascalMcpSdkPr60Runs = [
     name: "latest disproportionate delta review",
     inputTokens: 2_071_106,
     outputTokens: 48_601,
-    expectedExceededAxes: ["input"],
+    expectedExceededAxes: [],
   },
   {
     name: "post-cap full review with cached input reported separately",
@@ -62,6 +62,20 @@ describe("review execution token budget", () => {
       expect(exceededAxes(run)).toEqual(run.expectedExceededAxes);
     });
   }
+
+  test("leaves enough input for each lane in the four-way review fan-out", () => {
+    const coordinatorInputTokens = 60_000;
+    const laneCount = 4;
+    const observedMaximumLaneInputTokens = 582_771;
+    const laneInputGrant = Math.floor(
+      (reviewExecutionRootBudget.maxInputTokensPerSession -
+        coordinatorInputTokens) /
+        laneCount,
+    );
+
+    expect(laneInputGrant).toBe(1_985_000);
+    expect(laneInputGrant).toBeGreaterThan(observedMaximumLaneInputTokens);
+  });
 
   test("checks input and output independently at their exact boundaries", () => {
     expect(

@@ -171,9 +171,15 @@ tokens, cache tokens, exact USD cost, generation time, latency, outcome, and
 review kind. Generation lookup failures are visible but do not expose prompts
 or source.
 
-Eve caps the complete review execution tree at 2,000,000 provider-reported
-input tokens and 64,000 output tokens. Child sessions receive shares of the
+Eve caps the complete review execution tree at 8,000,000 provider-reported
+input tokens and 512,000 output tokens. Child sessions receive shares of the
 root's remaining quota, and their completed usage is charged back to the root.
+The input cap leaves about 1,985,000 tokens for each lane when the coordinator
+uses 60,000 tokens before the four-way fan-out. A 2,000,000-token root cap left
+only 485,000 tokens per lane and stopped a full review before publication, even
+though sibling lanes still had unused shares. Provider-reported aggregate run
+usage must not be reused as the root quota because Eve divides that quota
+before the parallel lanes run.
 Cached input is a subset reported separately for telemetry, not an amount added
 again to input usage. Fresh full and delta roots run in task mode so the cap
 cannot be renewed through a conversation continuation. Exhaustion publishes an
