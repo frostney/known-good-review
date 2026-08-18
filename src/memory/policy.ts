@@ -54,7 +54,12 @@ export const memoryPolicy: MemoryPolicy = {
   },
   ranking: {
     recency: { bootstrap: 1, short: 1, mid: 0.72, long: 0.48 },
-    severity: { BLOCKING: 1.25, IMPORTANT: 1.1, IMPROVEMENT: 0.9 },
+    severity: {
+      BLOCKING: 1.25,
+      IMPORTANT: 1.1,
+      IMPROVEMENT: 0.9,
+      NITPICK: 0.72,
+    },
     status: { open: 1.15, deferred: 1, fixed: 0.7 },
     recurrenceStep: 0.08,
     maximumRecurrenceBoost: 0.5,
@@ -62,7 +67,11 @@ export const memoryPolicy: MemoryPolicy = {
 };
 
 export type MemoryTier = "bootstrap" | "short" | "mid" | "long";
-export type MemorySeverity = "BLOCKING" | "IMPORTANT" | "IMPROVEMENT";
+export type MemorySeverity =
+  | "BLOCKING"
+  | "IMPORTANT"
+  | "IMPROVEMENT"
+  | "NITPICK";
 export type MemoryStatus = "open" | "deferred" | "fixed";
 
 export interface RepositoryMemoryStats {

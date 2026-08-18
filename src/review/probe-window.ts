@@ -1,5 +1,5 @@
 export const reviewLaneProbeSteps = 12;
-export const coordinatorReviewSteps = 12;
+export const coordinatorReviewSteps = 16;
 
 export function reviewLaneProbeWindowClosed(input: {
   readonly channelKind: string | undefined;

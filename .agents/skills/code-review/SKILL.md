@@ -38,6 +38,9 @@ architecture, security, compatibility, or scope decision.
 
 - Exact file lists and prior-findings JSON are additive inputs. They do not
   change unscoped review behavior unless the user supplies them.
+- A reporting profile or threshold changes presentation only. Gather and
+  validate the complete candidate set, retain every supported severity in the
+  canonical result, and let the caller decide which severities become visible.
 - `subagents` is an additive execution input. Without it, do not delegate any
   part of the review.
 - Default remediation is none. Inspect and run safe local probes, but do not
@@ -307,16 +310,22 @@ Include:
 - de-duplication coverage, coalesced evidence sources, and merged or conflicted
   candidate findings;
 - actionable findings as
-  `[CR-N][BLOCKING|IMPORTANT|IMPROVEMENT][CLAIM|QUALITY|ARCHITECTURE_RISK|
+  `[CR-N][BLOCKING|IMPORTANT|IMPROVEMENT|NITPICK][CLAIM|QUALITY|ARCHITECTURE_RISK|
   DISCOVERABILITY]
   file:line: evidence, impact, smallest remedy`;
 - verified claims, static-only or unreached areas, and retained probe artifacts.
 
+Render every literal repository path, filename including extensionless files,
+variable, function, method, class, type, and other code identifier as inline
+code. Keep prose outside code spans.
+
 `BLOCKING` prevents safe shipment. `IMPORTANT` has material correctness,
 security, operability, test-value, maintainability, simplification, or
 comprehension cost. `IMPROVEMENT` is a verified worthwhile simplification or
-current-practice alignment. Omit praise, diff narration, style nits, and
-findings without concrete impact.
+current-practice alignment. `NITPICK` is a small, local polish issue with a
+clear remedy and evidence from repository conventions or current code; it must
+not represent personal taste or block readiness. Omit praise, diff narration,
+subjective style preferences, and findings without concrete impact.
 
 ### Targeted revalidation report
 
@@ -362,3 +371,4 @@ findings, and do not turn remediation into a fresh review.
 When invoked as `/code-review fix-all` from an implementation workflow, continue
 to PR creation only when no unresolved `BLOCKING` or `IMPORTANT` finding
 remains. Record any intentionally deferred `IMPROVEMENT`.
+Record any intentionally deferred `NITPICK`; it never blocks PR creation.

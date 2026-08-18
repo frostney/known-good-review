@@ -97,6 +97,26 @@ describe("dynamic Eve model routing", () => {
     ).toThrow("outside the trusted chain");
   });
 
+  test("routes specialist copies to Luna with xhigh OpenAI reasoning", () => {
+    expect(
+      selectRoutedModel({
+        attributes: { [routingAttribute]: config },
+        channelKind: "subagent",
+        messages: childMessage(
+          routingEnvelope({ role: "commenter", attempt: 0 }),
+        ),
+      }),
+    ).toEqual({
+      model: "openai/gpt-5.6-luna",
+      modelOptions: {
+        providerOptions: {
+          gateway: { caching: "auto" },
+          openai: { reasoningEffort: "xhigh" },
+        },
+      },
+    });
+  });
+
   test("fails closed for missing or invented lane routes", () => {
     expect(() =>
       selectRoutedModel({

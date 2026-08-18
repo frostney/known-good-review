@@ -12,23 +12,32 @@ export const defaultModels = [
   "anthropic/claude-opus-5",
 ] as const;
 export const defaultModel = defaultModels[0];
+export const defaultSpecialistModels = ["openai/gpt-5.6-luna"] as const;
+export const defaultProfile = "balanced" as const;
 export const defaultEmbedding: EmbeddingConfig = {
   model: "voyage/voyage-4",
   dimension: 1024,
 };
 
 export type ModelChain = readonly [string, ...string[]];
+export const reviewProfiles = ["focused", "balanced", "thorough"] as const;
+export type ReviewProfile = (typeof reviewProfiles)[number];
+export const specialistRoles = ["scout", "commenter"] as const;
+export type SpecialistRole = (typeof specialistRoles)[number];
+export type ReviewAgentRole = ReviewAxis | SpecialistRole;
 
 export interface ReviewConfig {
   readonly model: ModelChain;
   readonly embedding: EmbeddingConfig;
   readonly publicRoots: readonly string[];
+  readonly profile: ReviewProfile;
+  readonly blocking: boolean;
   readonly agents:
     | { readonly kind: "inherit" }
     | { readonly kind: "all"; readonly models: ModelChain }
     | {
         readonly kind: "axes";
-        readonly models: Readonly<Partial<Record<ReviewAxis, ModelChain>>>;
+        readonly models: Readonly<Partial<Record<ReviewAgentRole, ModelChain>>>;
       };
 }
 
@@ -38,14 +47,19 @@ const rawConfigSchema = z
     embedding: z.string().optional(),
     embeddingDimension: z.number().int().optional(),
     publicRoots: z.array(z.string().min(1)).optional(),
+    profile: z.enum(reviewProfiles).optional(),
+    blocking: z.boolean().optional(),
     agents: z
       .union([
         z.string(),
         z
           .object(
             Object.fromEntries(
-              reviewAxes.map((axis) => [axis, z.string().optional()]),
-            ) as Record<ReviewAxis, z.ZodOptional<z.ZodString>>,
+              [...reviewAxes, ...specialistRoles].map((role) => [
+                role,
+                z.string().optional(),
+              ]),
+            ) as Record<ReviewAgentRole, z.ZodOptional<z.ZodString>>,
           )
           .strict(),
       ])
@@ -106,6 +120,8 @@ export function parseReviewConfig(source: string | null | undefined): ReviewConf
       model: [...defaultModels],
       embedding: defaultEmbedding,
       publicRoots: [],
+      profile: defaultProfile,
+      blocking: false,
       agents: { kind: "inherit" },
     };
   }
@@ -140,23 +156,34 @@ export function parseReviewConfig(source: string | null | undefined): ReviewConf
   });
   const agents = result.data.agents;
   const publicRoots = parsePublicRoots(result.data.publicRoots);
+  const profile = result.data.profile ?? defaultProfile;
+  const blocking = result.data.blocking ?? false;
   if (agents === undefined) {
-    return { model, embedding, publicRoots, agents: { kind: "inherit" } };
+    return {
+      model,
+      embedding,
+      publicRoots,
+      profile,
+      blocking,
+      agents: { kind: "inherit" },
+    };
   }
   if (typeof agents === "string") {
     return {
       model,
       embedding,
       publicRoots,
+      profile,
+      blocking,
       agents: { kind: "all", models: parseModelChain(agents, "agents") },
     };
   }
 
-  const models: Partial<Record<ReviewAxis, ModelChain>> = {};
-  for (const axis of reviewAxes) {
-    const configured = agents[axis];
+  const models: Partial<Record<ReviewAgentRole, ModelChain>> = {};
+  for (const role of [...reviewAxes, ...specialistRoles]) {
+    const configured = agents[role];
     if (configured !== undefined) {
-      models[axis] = parseModelChain(configured, `agents.${axis}`);
+      models[role] = parseModelChain(configured, `agents.${role}`);
     }
   }
 
@@ -164,8 +191,23 @@ export function parseReviewConfig(source: string | null | undefined): ReviewConf
     model,
     embedding,
     publicRoots,
+    profile,
+    blocking,
     agents: { kind: "axes", models },
   };
+}
+
+export function modelsForSpecialist(
+  config: ReviewConfig,
+  role: SpecialistRole,
+): ModelChain {
+  if (config.agents.kind === "all") {
+    return config.agents.models;
+  }
+  if (config.agents.kind === "axes") {
+    return config.agents.models[role] ?? [...defaultSpecialistModels];
+  }
+  return [...defaultSpecialistModels];
 }
 
 export function modelsForAxis(

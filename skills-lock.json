@@ -17,7 +17,7 @@
       "source": "frostney/known-good-route",
       "sourceType": "github",
       "skillPath": "code-review/SKILL.md",
-      "computedHash": "043f1abe4e7aaf48a2cea7bcad48660de66aa69830fadebc8fd686366096c1b6"
+      "computedHash": "c5e827f462446f285490b16ad8aaa0889199492d0c115cadfad9bf6e112e88b1"
     },
     "codebase-audit": {
       "source": "frostney/known-good-route",
@@ -48,6 +48,12 @@
       "sourceType": "github",
       "skillPath": "delivery-wait/SKILL.md",
       "computedHash": "9479b6118b44445f40ad5181709c921dbe26abbc6439903acb330abe32b55712"
+    },
+    "diagnosing-bugs": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/diagnosing-bugs/SKILL.md",
+      "computedHash": "0354227d4242b8fecbde670d96cadb9703a771e6056cde888a11f12605e594dd"
     },
     "domain-modeling": {
       "source": "mattpocock/skills",

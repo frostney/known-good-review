@@ -9,6 +9,7 @@ export const vMemorySeverity = v.union(
   v.literal("BLOCKING"),
   v.literal("IMPORTANT"),
   v.literal("IMPROVEMENT"),
+  v.literal("NITPICK"),
 );
 
 export const vMemoryStatus = v.union(

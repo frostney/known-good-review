@@ -30,7 +30,7 @@ export const normalizedMemorySchema = z.object({
   cause: z.string().nullable(),
   remedy: z.string().min(1),
   outcome: z.enum(["open", "deferred", "fixed"]),
-  severity: z.enum(["BLOCKING", "IMPORTANT", "IMPROVEMENT"]),
+  severity: z.enum(["BLOCKING", "IMPORTANT", "IMPROVEMENT", "NITPICK"]),
   category: z.enum([
     "CLAIM",
     "QUALITY",

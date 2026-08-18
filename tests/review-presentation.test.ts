@@ -75,7 +75,7 @@ describe("native GitHub review presentation", () => {
     const body = reviewResultBody(
       report([finding("IMPORTANT"), { ...finding("IMPROVEMENT"), id: "CR-2" }]),
     );
-    expect(body).toContain("2 findings were posted inline");
+    expect(body).toContain("2 findings were detected; 2 were posted inline");
     expect(body).toContain("⚠️ 1 important");
     expect(body).toContain("💡 1 improvement");
   });
@@ -100,8 +100,37 @@ describe("native GitHub review presentation", () => {
       ),
     ).toEqual({ subjectType: "file" });
     expect(findingBody(finding(), "file")).toContain(
-      "Reported location: line 11",
+      "Reported location: `src/review.ts`, line 11",
     );
+  });
+
+  test("keeps nitpicks visible while profiles control inline publication", () => {
+    const nitpick = finding("NITPICK");
+    const balanced = reviewResultBody(report([nitpick]));
+    expect(balanced).toContain("1 finding was detected; 0 were posted inline");
+    expect(balanced).toContain("🧹 1 nitpick detected · hidden by balanced profile");
+
+    const thorough = reviewResultBody(report([nitpick]), {
+      blocking: false,
+      profile: "thorough",
+    });
+    expect(thorough).toContain("1 finding was detected; 1 was posted inline");
+    expect(thorough).toContain("🧹 1 nitpick");
+  });
+
+  test("requests changes only when blocking policy has a material finding", () => {
+    const important = report([finding("IMPORTANT")]);
+    expect(reviewResultBody(important)).toContain(
+      "## 💬 known-good-review: review complete",
+    );
+    expect(
+      reviewResultBody(important, { blocking: true, profile: "balanced" }),
+    ).toContain("## ❌ known-good-review: changes requested");
+
+    const nitpick = report([finding("NITPICK")]);
+    expect(
+      reviewResultBody(nitpick, { blocking: true, profile: "thorough" }),
+    ).toContain("## 💬 known-good-review: review complete");
   });
 
   test("uses the left side for a finding on a deleted line", () => {
