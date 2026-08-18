@@ -18,6 +18,7 @@ import {
   type CommenterPresentation,
 } from "./commenter-presentation";
 import { reviewAxes, type ReviewAxis } from "../review/axes";
+import { findingIdentity } from "../review/finding-identity";
 
 export { findingBody } from "./review-presentation";
 
@@ -160,11 +161,28 @@ function inactiveTimelineFindingBody(id: string): string {
   ].join("\n");
 }
 
-function markerId(body: string | null | undefined): string | null {
-  const match = body?.match(
-    /<!-- known-good-review:(?:finding|retired-finding):(CR-[1-9]\d*) -->/,
+interface FindingMarker {
+  readonly id: string;
+  readonly identity: string | null;
+}
+
+function findingMarker(body: string | null | undefined): FindingMarker | null {
+  const current = body?.match(
+    /<!-- known-good-review:finding:v2:([a-f0-9]{64}):(CR-[1-9]\d*) -->/,
   );
-  return match?.[1] ?? null;
+  if (current?.[1] && current[2]) {
+    return { identity: current[1], id: current[2] };
+  }
+  const legacy = body?.match(
+    /<!-- known-good-review:finding:(CR-[1-9]\d*) -->/,
+  );
+  return legacy?.[1] ? { identity: null, id: legacy[1] } : null;
+}
+
+function timelineMarkerId(body: string | null | undefined): string | null {
+  return body?.match(
+    /<!-- known-good-review:(?:finding|retired-finding):(CR-[1-9]\d*) -->/,
+  )?.[1] ?? null;
 }
 
 function hasBlockingFinding(report: ReviewReport): boolean {
@@ -691,62 +709,61 @@ async function reconcileFindingComments(
   config: Pick<ReviewConfig, "blocking" | "profile">,
   presentation: CommenterPresentation | null,
   files: readonly PullRequestFileForComment[],
-): Promise<void> {
+): Promise<() => Promise<void>> {
   const comments = await octokit.paginate(octokit.rest.pulls.listReviewComments, {
     owner: context.owner,
     repo: context.repo,
     pull_number: context.pullRequest,
     per_page: 100,
   });
-  const rootsById = new Map<string, typeof comments>();
+  const rootsByIdentity = new Map<string, typeof comments>();
+  const markerByIdentity = new Map<string, FindingMarker>();
   for (const comment of comments) {
     if (comment.in_reply_to_id !== null && comment.in_reply_to_id !== undefined) continue;
-    const id = markerId(comment.body);
-    if (!id) continue;
-    rootsById.set(id, [...(rootsById.get(id) ?? []), comment]);
+    const marker = findingMarker(comment.body);
+    if (!marker) continue;
+    const identity = marker.identity ?? `legacy:${marker.id}`;
+    rootsByIdentity.set(identity, [
+      ...(rootsByIdentity.get(identity) ?? []),
+      comment,
+    ]);
+    markerByIdentity.set(identity, marker);
   }
   const existing = new Map(
-    [...rootsById].flatMap(([id, roots]) => {
+    [...rootsByIdentity].flatMap(([identity, roots]) => {
       const newest = roots.at(-1);
-      return newest ? [[id, newest] as const] : [];
+      return newest ? [[identity, newest] as const] : [];
     }),
   );
   const findings = publishedFindings(report, config.profile);
-  const active = new Set(findings.map((finding) => finding.id));
+  const active = new Set(findings.map(findingIdentity));
   const presentationById = new Map(
     presentation?.findings.map((finding) => [finding.id, finding] as const) ?? [],
   );
   const newThreads: NewReviewThread[] = [];
+  const commentUpdates: Array<{ readonly body: string; readonly id: number }> = [];
+  const resolutions: Array<{
+    readonly id: string;
+    readonly identity: string;
+    readonly reason: "fixed" | "moved" | "not-published";
+  }> = [];
 
   for (const finding of findings) {
+    const identity = findingIdentity(finding);
     const location = reviewCommentLocation(finding, files);
     const body = findingBody(
       finding,
       location.subjectType,
       presentationById.get(finding.id),
     );
-    const prior = existing.get(finding.id);
+    const prior = existing.get(identity);
     if (prior && sameCommentLocation(prior, finding, location)) {
       if (prior.body !== body) {
-        await octokit.rest.pulls.updateReviewComment({
-          owner: context.owner,
-          repo: context.repo,
-          comment_id: prior.id,
-          body,
-        });
+        commentUpdates.push({ body, id: prior.id });
       }
     } else {
       if (prior) {
-        const threads = await reviewThreadIdentities(octokit, context);
-        await replyAndResolveFinding(
-          octokit,
-          context,
-          comments,
-          rootsById.get(finding.id) ?? [],
-          finding.id,
-          "moved",
-          threads,
-        );
+        resolutions.push({ id: finding.id, identity, reason: "moved" });
       }
       newThreads.push({ body, finding, location });
     }
@@ -754,25 +771,44 @@ async function reconcileFindingComments(
 
   await createReviewThreads(octokit, context, newThreads, report, config);
 
-  const inactiveIds = [...existing.keys()].filter((id) => !active.has(id));
-  const threadIdentities = inactiveIds.length > 0
-    ? await reviewThreadIdentities(octokit, context)
-    : [];
-  const canonicalById = new Map(report.findings.map((finding) => [finding.id, finding]));
-  for (const [id] of existing) {
-    if (!active.has(id)) {
-      const finding = canonicalById.get(id);
+  const canonicalByIdentity = new Map(
+    report.findings.map((finding) => [findingIdentity(finding), finding] as const),
+  );
+  for (const identity of existing.keys()) {
+    if (!active.has(identity)) {
+      const finding = canonicalByIdentity.get(identity);
+      resolutions.push({
+        id: finding?.id ?? markerByIdentity.get(identity)?.id ?? "CR-1",
+        identity,
+        reason: finding?.status === "fixed" ? "fixed" : "not-published",
+      });
+    }
+  }
+
+  return async () => {
+    for (const update of commentUpdates) {
+      await octokit.rest.pulls.updateReviewComment({
+        owner: context.owner,
+        repo: context.repo,
+        comment_id: update.id,
+        body: update.body,
+      });
+    }
+    const threads = resolutions.length > 0
+      ? await reviewThreadIdentities(octokit, context)
+      : [];
+    for (const resolution of resolutions) {
       await replyAndResolveFinding(
         octokit,
         context,
         comments,
-        rootsById.get(id) ?? [],
-        id,
-        finding?.status === "fixed" ? "fixed" : "not-published",
-        threadIdentities,
+        rootsByIdentity.get(resolution.identity) ?? [],
+        resolution.id,
+        resolution.reason,
+        threads,
       );
     }
-  }
+  };
 }
 
 async function failRunningAxisChecks(
@@ -814,7 +850,7 @@ async function retireTimelineFindingComments(
   });
   const active = new Set(findings.map((finding) => finding.id));
   for (const comment of comments) {
-    const id = markerId(comment.body);
+    const id = timelineMarkerId(comment.body);
     if (!id) continue;
     const body = active.has(id)
       ? retiredTimelineFindingBody(id)
@@ -893,19 +929,15 @@ export async function publishReview(input: {
       per_page: 100,
     },
   );
+  let cleanupFindingComments: (() => Promise<void>) | null = null;
   if (input.reconcileFindings ?? true) {
-    await reconcileFindingComments(
+    cleanupFindingComments = await reconcileFindingComments(
       input.octokit,
       input.context,
       input.report,
       config,
       presentation,
       changed,
-    );
-    await retireTimelineFindingComments(
-      input.octokit,
-      input.context,
-      publishedFindings(input.report, config.profile),
     );
   } else if (config.blocking) {
     await createReviewThreads(
@@ -968,6 +1000,27 @@ export async function publishReview(input: {
     },
     updatedAt: new Date().toISOString(),
   });
+  if (cleanupFindingComments) {
+    const cleanupResults = await Promise.allSettled([
+      cleanupFindingComments(),
+      retireTimelineFindingComments(
+        input.octokit,
+        input.context,
+        publishedFindings(input.report, config.profile),
+      ),
+    ]);
+    for (const result of cleanupResults) {
+      if (result.status === "rejected") {
+        console.warn(
+          JSON.stringify({
+            event: "known-good-review.publication.cleanup_failed",
+            error:
+              result.reason instanceof Error ? result.reason.name : "unknown",
+          }),
+        );
+      }
+    }
+  }
   return {
     checkUrl,
     findingCount: publishedFindings(input.report, config.profile).length,
@@ -1047,7 +1100,7 @@ export async function publishBudgetExhaustedCheck(input: {
     output: {
       title: "known-good-review: review incomplete",
       summary: [
-        "The review stopped without publishing a verdict because its Eve session budget was exhausted.",
+        "The review stopped without publishing a verdict because its review execution budget was exhausted.",
         "",
         `Review axis: **${input.reviewAxis}**`,
         `Budget axis: **${input.budgetAxis}**`,

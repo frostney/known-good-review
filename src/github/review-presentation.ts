@@ -1,5 +1,6 @@
 import type { ReviewFinding, ReviewReport } from "../review/findings";
 import type { ReviewConfig, ReviewProfile } from "../config/review-config";
+import { findingIdentity } from "../review/finding-identity";
 import {
   deterministicFindingPresentation,
   renderRichText,
@@ -78,7 +79,7 @@ export function findingBody(
   const presentation = suppliedPresentation ?? deterministicFindingPresentation(finding);
   const status = finding.status === "open" ? "Open" : titleCase(finding.status);
   return [
-    `<!-- known-good-review:finding:${finding.id} -->`,
+    `<!-- known-good-review:finding:v2:${findingIdentity(finding)}:${finding.id} -->`,
     `### ${severityEmoji[finding.severity]} ${renderRichText(presentation.title)}`,
     "",
     `**${titleCase(finding.category)} · ${status}**`,

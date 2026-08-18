@@ -133,11 +133,15 @@ comment. Completion moves the active Check Run to its final verdict.
 Every successful publication also updates one visible PR summary containing the
 result and a hidden canonical state schema v2 artifact, baseline head,
 whole-patch fingerprint, and per-file fingerprints. Findings use native inline
-review threads at their exact diff locations. Stable hidden `CR-N` markers own
-reconciliation without exposing internal IDs. A fixed finding receives one
+review threads at their exact diff locations. Hidden semantic fingerprints,
+derived from the canonical cause, invariant, and remedy, own reconciliation;
+`CR-N` remains only the run-local display order. A fixed finding receives one
 reply on its original inline thread, which is then resolved; it is never
-reposted. Check lookup is scoped to the current head and fixed aggregate and
-axis names.
+reposted. Replacement threads are submitted and the Check and state artifact
+are made durable before old threads are retired. Retirement failures are
+reported as cleanup telemetry and retried by later publication without
+invalidating the new artifact. Check lookup is scoped to the current head and
+fixed aggregate and axis names.
 
 The state artifact is size-bounded to GitHub's comment limit. Oversize or
 invalid output fails before advancing the baseline. A completed or failed Eve
@@ -167,9 +171,13 @@ tokens, cache tokens, exact USD cost, generation time, latency, outcome, and
 review kind. Generation lookup failures are visible but do not expose prompts
 or source.
 
-Eve caps a root review session at 2,000,000 input tokens and 64,000 output
-tokens. Fresh full and delta roots run in task mode so the cap cannot be renewed
-through a conversation continuation. Exhaustion publishes an `action_required`
-Check with measured usage and the configured cap, publishes no partial verdict,
-and never retries automatically. Input telemetry also evaluates 2M, 3M, 4M,
-and 6M comparison thresholds during the provisional rollout.
+Eve caps the complete review execution tree at 2,000,000 provider-reported
+input tokens and 64,000 output tokens. Child sessions receive shares of the
+root's remaining quota, and their completed usage is charged back to the root.
+Cached input is a subset reported separately for telemetry, not an amount added
+again to input usage. Fresh full and delta roots run in task mode so the cap
+cannot be renewed through a conversation continuation. Exhaustion publishes an
+`action_required` Check with measured usage and the configured cap, publishes
+no partial verdict, and never retries automatically. Input telemetry also
+evaluates 2M, 3M, 4M, and 6M comparison thresholds during the provisional
+rollout.

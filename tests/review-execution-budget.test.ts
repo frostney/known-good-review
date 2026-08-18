@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import agent from "../agent/agent";
-import { reviewExecutionTokenLimits } from "../src/review/execution-budget";
+import { reviewExecutionRootBudget } from "../src/review/execution-budget";
 
 type BudgetAxis = "input" | "output";
 
@@ -11,13 +11,13 @@ function exceededAxes(input: {
   const exceeded: BudgetAxis[] = [];
   if (
     input.inputTokens >
-    reviewExecutionTokenLimits.maxInputTokensPerSession
+    reviewExecutionRootBudget.maxInputTokensPerSession
   ) {
     exceeded.push("input");
   }
   if (
     input.outputTokens >
-    reviewExecutionTokenLimits.maxOutputTokensPerSession
+    reviewExecutionRootBudget.maxOutputTokensPerSession
   ) {
     exceeded.push("output");
   }
@@ -43,11 +43,18 @@ const pascalMcpSdkPr60Runs = [
     outputTokens: 48_601,
     expectedExceededAxes: ["input"],
   },
+  {
+    name: "post-cap full review with cached input reported separately",
+    inputTokens: 1_500_000,
+    cacheReadTokens: 1_200_000,
+    outputTokens: 29_000,
+    expectedExceededAxes: [],
+  },
 ] as const;
 
 describe("review execution token budget", () => {
-  test("configures the root Eve session with the review budget", () => {
-    expect(agent.limits).toEqual(reviewExecutionTokenLimits);
+  test("configures the root Eve session with the whole-tree review budget", () => {
+    expect(agent.limits).toEqual(reviewExecutionRootBudget);
   });
 
   for (const run of pascalMcpSdkPr60Runs) {
@@ -59,16 +66,16 @@ describe("review execution token budget", () => {
   test("checks input and output independently at their exact boundaries", () => {
     expect(
       exceededAxes({
-        inputTokens: reviewExecutionTokenLimits.maxInputTokensPerSession,
-        outputTokens: reviewExecutionTokenLimits.maxOutputTokensPerSession,
+        inputTokens: reviewExecutionRootBudget.maxInputTokensPerSession,
+        outputTokens: reviewExecutionRootBudget.maxOutputTokensPerSession,
       }),
     ).toEqual([]);
     expect(
       exceededAxes({
         inputTokens:
-          reviewExecutionTokenLimits.maxInputTokensPerSession + 1,
+          reviewExecutionRootBudget.maxInputTokensPerSession + 1,
         outputTokens:
-          reviewExecutionTokenLimits.maxOutputTokensPerSession + 1,
+          reviewExecutionRootBudget.maxOutputTokensPerSession + 1,
       }),
     ).toEqual(["input", "output"]);
   });

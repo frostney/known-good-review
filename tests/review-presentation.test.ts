@@ -55,6 +55,27 @@ function report(findings: readonly ReviewFinding[]): ReviewReport {
 }
 
 describe("native GitHub review presentation", () => {
+  test("uses semantic finding identity instead of the run-local CR number", () => {
+    const first = findingBody(finding());
+    const renumbered = findingBody({
+      ...finding(),
+      id: "CR-9",
+      location: { path: "src/moved.ts", line: 42, symbol: "publish" },
+    });
+    const unrelated = findingBody({
+      ...finding(),
+      title: "The release omits the generated manifest",
+      impact: "Published release documentation can describe stale artifacts.",
+      remedy: "Regenerate the manifest before publishing the release.",
+    });
+    const identity = (body: string) =>
+      body.match(/known-good-review:finding:v2:([a-f0-9]{64}):CR-[1-9]\d*/)?.[1];
+
+    expect(identity(first)).toBeDefined();
+    expect(identity(renumbered)).toBe(identity(first));
+    expect(identity(unrelated)).not.toBe(identity(first));
+  });
+
   test("renders emoji severity without exposing the internal finding id", () => {
     const body = findingBody(finding());
     const visible = body.replace(/<!--.*?-->/s, "");
