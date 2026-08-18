@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import type { ChannelFrom, Session } from "eve/channels";
+import type {
+  ChannelFrom,
+  ChannelSendOptions,
+  Session,
+} from "eve/channels";
 import type { SessionAuthContext } from "eve/context";
 import {
   decodeReviewState,
@@ -138,8 +142,8 @@ describe("GitHub-owned state and telemetry", () => {
           status: "reset" as const,
         };
       },
-      send: async () => {
-        events.push("send");
+      send: async (_message: unknown, options: ChannelSendOptions) => {
+        events.push(`send:${options.mode ?? "conversation"}`);
         return {} as Session;
       },
     })) as unknown as ChannelFrom;
@@ -147,13 +151,13 @@ describe("GitHub-owned state and telemetry", () => {
     await routed("repo:1:pull:53").send("review", {
       auth: reviewAuth("full"),
     });
-    expect(events).toEqual(["reset", "send"]);
+    expect(events).toEqual(["reset", "send:task"]);
 
     events.length = 0;
     await routed("repo:1:pull:53").send("Approve", {
       auth: reviewAuth("full", "review-control-response"),
     });
-    expect(events).toEqual(["send"]);
+    expect(events).toEqual(["send:conversation"]);
   });
 
   test("acknowledges the exact manual trigger without blocking the review", async () => {

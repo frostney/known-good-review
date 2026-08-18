@@ -1,5 +1,6 @@
 import { defineAgent, defineDynamic } from "eve";
 import { selectRoutedModel } from "../src/models/routing";
+import { reviewExecutionTokenLimits } from "../src/review/execution-budget";
 
 export default defineAgent({
   model: defineDynamic({
@@ -12,10 +13,7 @@ export default defineAgent({
         }),
     },
   }),
-  limits: {
-    maxInputTokensPerSession: 8_000_000,
-    maxOutputTokensPerSession: 512_000,
-  },
+  limits: reviewExecutionTokenLimits,
   compaction: {
     thresholdPercent: 0.25,
   },
