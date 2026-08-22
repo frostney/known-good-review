@@ -214,7 +214,9 @@ export async function runCapabilityPreflight(
 
   const payload = capabilityPayloadSchema.parse({
     schemaVersion: 1,
-    ...identity,
+    baseSha: identity.baseSha,
+    headSha: identity.headSha,
+    patchFingerprint: identity.patchFingerprint,
     network: "github-only",
     commands: capabilityCommandNames.map((name) => ({
       name,
