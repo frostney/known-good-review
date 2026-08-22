@@ -67,6 +67,22 @@ describe("review capability preflight", () => {
     ).toEqual({ name: "fpc", available: true });
   });
 
+  test("accepts a trusted identity object with unrelated context fields", async () => {
+    const observed = sandbox();
+    const trustedContext = {
+      ...identity,
+      installationId: 42,
+      owner: "frostney",
+      repo: "pascal-mcp-sdk",
+    };
+    const result = await runCapabilityPreflight(observed.runtime, trustedContext);
+
+    expect(result.preflight).toMatchObject(identity);
+    expect(result.preflight).not.toHaveProperty("installationId");
+    expect(result.preflight).not.toHaveProperty("owner");
+    expect(result.preflight).not.toHaveProperty("repo");
+  });
+
   test("rejects a modified or mismatched preflight", async () => {
     const observed = sandbox();
     await runCapabilityPreflight(observed.runtime, identity);
