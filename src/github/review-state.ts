@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { reviewProfiles } from "../config/review-config";
 import { reviewReportSchema } from "../review/findings";
+import { reviewFailureEnvelopeSchema } from "../review/recovery";
 import {
   reviewProgressBody,
   reviewResultBody,
@@ -34,6 +35,7 @@ export const reviewStateSchema = z.object({
       report: reviewReportSchema,
     })
     .nullable(),
+  failure: reviewFailureEnvelopeSchema.optional(),
   updatedAt: z.string().datetime(),
 });
 
@@ -42,8 +44,9 @@ export type ReviewState = z.infer<typeof reviewStateSchema>;
 export function encodeReviewState(state: ReviewState): string {
   const parsed = reviewStateSchema.parse(state);
   const json = JSON.stringify(parsed);
-  const visible =
-    parsed.initialFullStatus === "completed" && parsed.baseline
+  const visible = parsed.failure
+    ? reviewProgressBody("failed")
+    : parsed.initialFullStatus === "completed" && parsed.baseline
       ? reviewResultBody(
           parsed.baseline.report,
           parsed.publication ?? { blocking: false, profile: "balanced" },

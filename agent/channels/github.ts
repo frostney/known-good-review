@@ -260,6 +260,21 @@ async function trustedReviewControlAuth(ctx: GitHubInboundContext) {
   if (!activeReview) {
     throw new Error("No current-head review identity was found");
   }
+  const patchFingerprint = effectivePatchFingerprint(patchFiles);
+  const failure = state.kind === "valid" ? state.state.failure : undefined;
+  if (failure) {
+    if (!failure.retryEligible) {
+      throw new Error("The failed review is not eligible for continuation");
+    }
+    if (
+      failure.baseSha !== pullRequest.base.sha ||
+      failure.headSha !== pullRequest.head.sha ||
+      failure.patchFingerprint !== patchFingerprint ||
+      failure.planKind !== activeReview.kind
+    ) {
+      throw new Error("The failed review no longer matches the current head");
+    }
+  }
 
   const deltaDispatch =
     activeReview.kind === "delta"
@@ -299,7 +314,7 @@ async function trustedReviewControlAuth(ctx: GitHubInboundContext) {
     configSource,
     event: "review-control-response",
     headSha: pullRequest.head.sha,
-    patchFingerprint: effectivePatchFingerprint(patchFiles),
+    patchFingerprint,
     plan: JSON.stringify(plan),
     ...repositoryDetails,
     reviewFiles,
@@ -483,6 +498,13 @@ async function dispatchReview(input: {
     );
   }
 
+  const priorFindings =
+    dispatch.plan.kind === "delta" && dispatch.priorReport
+      ? findingsToRevalidate(
+          dispatch.priorReport.findings,
+          new Set(dispatch.changedFiles),
+        )
+      : [];
   const envelope = {
     operation: dispatch.plan.kind,
     plan: dispatch.plan,
@@ -494,22 +516,13 @@ async function dispatchReview(input: {
     activeAxes,
     priorFindings:
       dispatch.plan.kind === "delta" && dispatch.priorReport
-        ? {
-            ...dispatch.priorReport,
-            findings: findingsToRevalidate(
-              dispatch.priorReport.findings,
-              new Set(dispatch.changedFiles),
-            ),
-          }
+        ? { ...dispatch.priorReport, findings: priorFindings }
         : undefined,
     carryForwardFindings:
       dispatch.plan.kind === "delta" && dispatch.priorReport
         ? dispatch.priorReport.findings.filter(
             (finding) =>
-              !findingsToRevalidate(
-                dispatch.priorReport?.findings ?? [],
-                new Set(dispatch.changedFiles),
-              ).some((selected) => selected.id === finding.id),
+              !priorFindings.some((selected) => selected.id === finding.id),
           )
         : undefined,
   };
@@ -521,7 +534,11 @@ async function dispatchReview(input: {
     ...(dispatch.patchFingerprint === undefined
       ? {}
       : { patchFingerprint: dispatch.patchFingerprint }),
-    plan: JSON.stringify(dispatch.plan),
+    plan: JSON.stringify({
+      ...dispatch.plan,
+      activeAxes,
+      selectedFindingIds: priorFindings.map((finding) => finding.id),
+    }),
     ...repositoryDetails,
     reviewFiles: patchFiles
       .filter(

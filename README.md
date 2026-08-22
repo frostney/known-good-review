@@ -39,6 +39,10 @@ flowchart TD
 - A missing, malformed, or failed baseline never triggers an automatic
   replacement full review. A write/maintain/admin user can explicitly request
   one with `@known-good-review run full review`.
+- A current-head failure with validated checkpoints retains a sanitized retry
+  envelope. An authorized `@known-good-review continue` resumes only recorded
+  missing stages in the same durable session; mismatched or ineligible state
+  fails closed.
 
 One visible GitHub summary comment also holds the hidden authoritative versioned
 review state and complete v2 findings artifact. Convex stores advisory,

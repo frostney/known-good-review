@@ -1,6 +1,11 @@
 import type { Octokit } from "@octokit/rest";
 import type { ReviewConfig } from "../config/review-config";
-import { encodeReviewState, type ReviewState } from "./review-state";
+import {
+  decodeReviewState,
+  encodeReviewState,
+  isReviewStateComment,
+  type ReviewState,
+} from "./review-state";
 import type { TrustedGitHubContext } from "./trusted-context";
 import type { ReviewFinding, ReviewReport } from "../review/findings";
 import {
@@ -19,6 +24,7 @@ import {
 } from "./commenter-presentation";
 import { reviewAxes, type ReviewAxis } from "../review/axes";
 import { findingIdentity } from "../review/finding-identity";
+import type { ReviewFailureEnvelope } from "../review/recovery";
 
 export { findingBody } from "./review-presentation";
 
@@ -900,6 +906,66 @@ export async function writeReviewState(
     repo: context.repo,
     issue_number: context.pullRequest,
     body,
+  });
+}
+
+export async function writeReviewFailureState(input: {
+  readonly context: TrustedGitHubContext;
+  readonly failure: ReviewFailureEnvelope;
+  readonly octokit: OctokitClient;
+}): Promise<void> {
+  if (
+    !input.context.patchFingerprint ||
+    input.failure.baseSha !== input.context.baseSha ||
+    input.failure.headSha !== input.context.headSha ||
+    input.failure.patchFingerprint !== input.context.patchFingerprint
+  ) {
+    throw new Error("Review failure state does not match the trusted review");
+  }
+  const pullRequest = await input.octokit.rest.pulls.get({
+    owner: input.context.owner,
+    repo: input.context.repo,
+    pull_number: input.context.pullRequest,
+  });
+  if (
+    pullRequest.data.base.sha !== input.context.baseSha ||
+    pullRequest.data.head.sha !== input.context.headSha
+  ) {
+    throw new Error("Review failure state no longer targets the current head");
+  }
+  const comments = await input.octokit.paginate(
+    input.octokit.rest.issues.listComments,
+    {
+      owner: input.context.owner,
+      repo: input.context.repo,
+      issue_number: input.context.pullRequest,
+      per_page: 100,
+    },
+  );
+  const current = comments
+    .filter((comment) => isReviewStateComment(comment.body ?? ""))
+    .map((comment) => decodeReviewState(comment.body ?? ""))
+    .filter(
+      (state): state is ReviewState =>
+        state !== null && state.pullRequest === input.context.pullRequest,
+    )
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+  if (current?.baseline?.head === input.context.headSha && !current.failure) {
+    return;
+  }
+  await writeReviewState(input.octokit, input.context, {
+    ...(current ?? {
+      schemaVersion: 2 as const,
+      app: checkName,
+      pullRequest: input.context.pullRequest,
+      initialFullStatus: "failed" as const,
+      baseline: null,
+    }),
+    ...(!current?.baseline && input.failure.planKind === "full"
+      ? { initialFullStatus: "failed" as const }
+      : {}),
+    failure: input.failure,
+    updatedAt: new Date().toISOString(),
   });
 }
 

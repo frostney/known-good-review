@@ -33,6 +33,10 @@ or act as a general-purpose GitHub assistant.
 - **Lost baseline:** evidence that a review existed but its state/artifact is
   missing, malformed, failed, or unusable. This state requires an authorized
   manual full review; it never causes an automatic second full review.
+- **Recoverable review failure:** a current-head execution that retained exact
+  checkpoint identity and a sanitized failure envelope. An authorized
+  continuation may resume its recorded missing stages without replacing the
+  last successfully published baseline.
 
 ## Authority boundaries
 

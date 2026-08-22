@@ -6,9 +6,15 @@ import {
   parseActiveReviewExternalId,
   publishInProgressCheck,
   publishReview,
+  writeReviewFailureState,
 } from "../src/github/publication";
 import type { TrustedGitHubContext } from "../src/github/trusted-context";
 import type { ReviewReport } from "../src/review/findings";
+import {
+  advanceReviewRecovery,
+  beginReviewRecovery,
+  buildReviewFailureEnvelope,
+} from "../src/review/recovery";
 
 interface CapturedRequest {
   readonly body: unknown;
@@ -95,6 +101,81 @@ function report(): ReviewReport {
 }
 
 describe("GitHub publication lifecycle", () => {
+  test("persists a current-head recovery failure without inventing review output", async () => {
+    const requests: CapturedRequest[] = [];
+    const failureContext = {
+      ...context(),
+      baseSha: "1".repeat(40),
+      headSha: "2".repeat(40),
+    };
+    const recovery = advanceReviewRecovery(
+      beginReviewRecovery({
+        activeAxes: ["engineering-quality"],
+        identity: {
+          baseSha: failureContext.baseSha,
+          headSha: failureContext.headSha,
+          patchFingerprint: failureContext.patchFingerprint ?? "",
+          planKind: "delta",
+        },
+        selectedFindingIds: ["CR-7"],
+      }),
+      {
+        completedAxes: ["engineering-quality"],
+        stage: "axes-complete",
+      },
+    );
+    const octokit = new Octokit({
+      auth: "test-token",
+      request: {
+        fetch: async (resource: Request | string | URL, init?: RequestInit) => {
+          const url = new URL(String(resource));
+          const method = init?.method ?? "GET";
+          const body =
+            typeof init?.body === "string" ? JSON.parse(init.body) : null;
+          requests.push({
+            body,
+            headers: new Headers(init?.headers),
+            method,
+            path: url.pathname,
+          });
+          if (method === "GET" && url.pathname.endsWith("/pulls/7")) {
+            return json({
+              base: { sha: failureContext.baseSha },
+              head: { sha: failureContext.headSha },
+            });
+          }
+          if (method === "GET" && url.pathname.endsWith("/issues/7/comments")) {
+            return json([]);
+          }
+          if (method === "POST" && url.pathname.endsWith("/issues/7/comments")) {
+            return json({ id: 401, body });
+          }
+          throw new Error(`Unexpected GitHub request: ${method} ${url.pathname}`);
+        },
+      },
+    });
+
+    await writeReviewFailureState({
+      context: failureContext,
+      failure: buildReviewFailureEnvelope({
+        errorClass: "WORKFLOW_INCOMPLETE",
+        recovery,
+        run: { sessionId: "session-safe", turnId: "turn-safe" },
+      }),
+      octokit,
+    });
+
+    expect(
+      requests.find(
+        (request) =>
+          request.method === "POST" &&
+          request.path.endsWith("/issues/7/comments"),
+      )?.body,
+    ).toMatchObject({
+      body: expect.stringContaining("known-good-review:state"),
+    });
+  });
+
   test("round-trips current-head review identity through the Check Run", () => {
     const full = activeReviewExternalId(context(), {
       kind: "full",

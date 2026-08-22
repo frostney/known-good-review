@@ -1,14 +1,13 @@
 import { gateway } from "ai";
-import { defineHook } from "eve/hooks";
+import { defineHook, type HookContext } from "eve/hooks";
 import { toolResultFrom } from "eve/tools";
 import publishReviewTool from "../tools/publish_review";
 import { githubAdapter } from "../../src/github/chat-adapter";
 import {
   publishBudgetExhaustedCheck,
   publishFailClosedCheck,
-  writeReviewState,
+  writeReviewFailureState,
 } from "../../src/github/publication";
-import { pendingReviewState } from "../../src/github/review-state";
 import {
   reviewContextAttributes,
   trustedGitHubContext,
@@ -20,6 +19,19 @@ import {
 } from "../../src/models/routing";
 import { shadowInputExceedances } from "../../src/telemetry/budget-policy";
 import { ownsReviewLifecycle } from "../../src/review/execution-session";
+import { readLaneCheckpoint } from "../../src/review/lane-checkpoint";
+import {
+  advanceReviewRecovery,
+  buildReviewFailureEnvelope,
+  reviewRecoveryStateSchema,
+  type ReviewFailureEnvelope,
+  type ReviewRecoveryState,
+} from "../../src/review/recovery";
+import {
+  currentRecoveryState,
+  recoveryStateFromAuth,
+  reviewRecoveryState,
+} from "../lib/review-recovery";
 import { z } from "zod";
 
 const stepRoutes = new Map<
@@ -76,6 +88,118 @@ function executionRoute(
 function reviewAxis(route: ReviewRoute): string {
   if (route.role === "lane") return route.axis;
   return route.role;
+}
+
+function symbolicErrorClass(value: string): string {
+  const normalized = value
+    .toUpperCase()
+    .replace(/[^A-Z0-9_]/g, "_")
+    .replace(/_+/g, "_")
+    .slice(0, 64);
+  return /^[A-Z]/.test(normalized)
+    ? normalized
+    : `TURN_${normalized}`.slice(0, 64);
+}
+
+async function recoveryWithObservedAxes(
+  ctx: HookContext,
+): Promise<ReviewRecoveryState> {
+  let recovery = currentRecoveryState(ctx.session.auth.current);
+  const trusted = trustedGitHubContext(ctx.session.auth.current);
+  if (!trusted.patchFingerprint) {
+    throw new Error("Trusted review recovery is missing patch identity");
+  }
+  const sandbox = await ctx.getSandbox();
+  const completedAxes: typeof recovery.completedAxes = [];
+  for (const axis of recovery.activeAxes) {
+    const checkpoint = await readLaneCheckpoint(
+      sandbox,
+      {
+        baseSha: trusted.baseSha,
+        headSha: trusted.headSha,
+        patchFingerprint: trusted.patchFingerprint,
+      },
+      axis,
+    );
+    if (checkpoint?.status === "complete") completedAxes.push(axis);
+  }
+  recovery =
+    recovery.stage === "started" &&
+    completedAxes.length === recovery.activeAxes.length
+      ? advanceReviewRecovery(recovery, {
+          completedAxes,
+          stage: "axes-complete",
+        })
+      : reviewRecoveryStateSchema.parse({ ...recovery, completedAxes });
+  reviewRecoveryState.update(() => recovery);
+  return recovery;
+}
+
+async function failureEnvelope(
+  ctx: HookContext,
+  turnId: string,
+  errorClass: string,
+  retryEligible?: boolean,
+): Promise<ReviewFailureEnvelope> {
+  return buildReviewFailureEnvelope({
+    errorClass: symbolicErrorClass(errorClass),
+    recovery: await recoveryWithObservedAxes(ctx),
+    ...(retryEligible === undefined ? {} : { retryEligible }),
+    run: { sessionId: ctx.session.id, turnId },
+  });
+}
+
+async function observedFailureEnvelope(
+  ctx: HookContext,
+  turnId: string,
+  errorClass: string,
+  retryEligible?: boolean,
+): Promise<ReviewFailureEnvelope | null> {
+  try {
+    return await failureEnvelope(ctx, turnId, errorClass, retryEligible);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "known-good-review.state.failure_envelope_unavailable",
+        error: error instanceof Error ? error.name : "unknown",
+      }),
+    );
+    return null;
+  }
+}
+
+function failureSummary(failure: ReviewFailureEnvelope): string {
+  const completed =
+    failure.completedAxes.length > 0
+      ? failure.completedAxes.join(", ")
+      : "none";
+  return [
+    `Review execution stopped at ${failure.failedStage}.`,
+    `Completed axes: ${completed}.`,
+    `Recovery revision: ${failure.executionRevision}.`,
+    `Retry eligible: ${failure.retryEligible ? "yes" : "no"}.`,
+    `Error class: ${failure.errorClass}.`,
+  ].join(" ");
+}
+
+async function persistFailureEnvelope(
+  context: ReturnType<typeof trustedGitHubContext>,
+  failure: ReviewFailureEnvelope | null,
+  octokit: ReturnType<typeof githubAdapter>["octokit"],
+): Promise<boolean> {
+  if (!failure) return false;
+  try {
+    await writeReviewFailureState({ context, failure, octokit });
+    return true;
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "known-good-review.state.failure_envelope_failed",
+        error: error instanceof Error ? error.name : "unknown",
+      }),
+    );
+    return false;
+  }
 }
 
 function recordTurnUsage(
@@ -140,6 +264,20 @@ function parsedPlan(
 
 export default defineHook({
   events: {
+    "turn.started"(_event, ctx) {
+      if (!isLifecycleOwner(ctx)) return;
+      const attributes = ctx.session.auth.current?.attributes ?? {};
+      const plan = parsedPlan(attributes);
+      if (plan?.kind !== "full" && plan?.kind !== "delta") return;
+      if (
+        attributes[reviewContextAttributes.event] === "review-control-response"
+      ) {
+        return;
+      }
+      reviewRecoveryState.update(() =>
+        recoveryStateFromAuth(ctx.session.auth.current),
+      );
+    },
     "message.received"(event, ctx) {
       if (ctx.channel.kind !== "subagent") return;
       try {
@@ -156,6 +294,12 @@ export default defineHook({
     "action.result"(event, ctx) {
       if (toolResultFrom(event.data.result, publishReviewTool)) {
         publishedTurns.add(`${ctx.session.id}:${event.data.turnId}`);
+        const recovery = reviewRecoveryState.get();
+        if (recovery?.stage === "report-reconciled") {
+          reviewRecoveryState.update(() =>
+            advanceReviewRecovery(recovery, { stage: "published" }),
+          );
+        }
       }
     },
     "step.started"(event, ctx) {
@@ -282,6 +426,17 @@ export default defineHook({
             event.data.code === "SESSION_TOKEN_LIMIT_REACHED"
               ? sessionLimitDetailsSchema.safeParse(event.data.details)
               : null;
+          const failure = await observedFailureEnvelope(
+            ctx,
+            event.data.turnId,
+            event.data.code,
+            limit?.success ? false : undefined,
+          );
+          const recoveryAvailable = await persistFailureEnvelope(
+            trusted,
+            failure,
+            adapter.octokit,
+          );
           if (limit?.success) {
             await publishBudgetExhaustedCheck({
               context: trusted,
@@ -294,19 +449,11 @@ export default defineHook({
           } else {
             await publishFailClosedCheck({
               context: trusted,
-              message: `Review execution failed closed (${event.data.code}).`,
+              message: failure && recoveryAvailable
+                ? failureSummary(failure)
+                : `Review execution failed closed (${symbolicErrorClass(event.data.code)}). Recovery state is unavailable; continuation is disabled.`,
               octokit: adapter.octokit,
             });
-          }
-          if (plan.kind === "full" && plan.reason === "initial") {
-            await writeReviewState(
-              adapter.octokit,
-              trusted,
-              pendingReviewState({
-                pullRequest: trusted.pullRequest,
-                status: "failed",
-              }),
-            );
           }
         } catch (error) {
           console.error(
@@ -345,22 +492,23 @@ export default defineHook({
         try {
           const trusted = trustedGitHubContext(ctx.session.auth.current);
           const adapter = githubAdapter(trusted.installationId);
+          const failure = await observedFailureEnvelope(
+            ctx,
+            event.data.turnId,
+            "WORKFLOW_INCOMPLETE",
+          );
+          const recoveryAvailable = await persistFailureEnvelope(
+            trusted,
+            failure,
+            adapter.octokit,
+          );
           await publishFailClosedCheck({
             context: trusted,
-            message:
-              "Review execution completed without publishing a validated v2 findings artifact.",
+            message: failure && recoveryAvailable
+              ? failureSummary(failure)
+              : "Review execution completed without publishing a validated v2 findings artifact. Recovery state is unavailable; continuation is disabled.",
             octokit: adapter.octokit,
           });
-          if (plan.kind === "full" && plan.reason === "initial") {
-            await writeReviewState(
-              adapter.octokit,
-              trusted,
-              pendingReviewState({
-                pullRequest: trusted.pullRequest,
-                status: "failed",
-              }),
-            );
-          }
         } catch (error) {
           console.error(
             JSON.stringify({
