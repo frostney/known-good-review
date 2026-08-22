@@ -4,6 +4,7 @@ import { getEncoding } from "js-tiktoken";
 import { z } from "zod";
 import type { TrustedGitHubContext } from "../github/trusted-context";
 import { prepareReviewWorkspace } from "../github/review-workspace";
+import { runCapabilityPreflight } from "./capability-preflight";
 import {
   readReviewEvidenceManifest,
   readReviewEvidencePatch,
@@ -97,7 +98,18 @@ export async function prepareReviewEvidence(
   const files = reviewFileScopeSchema.parse(inputFiles);
   const identity = { ...trusted, patchFingerprint: trusted.patchFingerprint };
   const existing = await preparedManifest(sandbox, identity, files);
-  if (existing) return existing;
+  if (existing) {
+    const capabilities = await runCapabilityPreflight(sandbox, identity);
+    if (capabilities.created) {
+      console.info(
+        JSON.stringify({
+          event: "known-good-review.capability_preflight.completed",
+          digest: capabilities.preflight.digest,
+        }),
+      );
+    }
+    return existing;
+  }
 
   await prepareReviewWorkspace(trusted, sandbox);
   await resetReviewEvidence(sandbox, trusted.patchFingerprint);
@@ -195,5 +207,14 @@ export async function prepareReviewEvidence(
     entries,
   };
   await writeReviewEvidenceManifest(sandbox, manifest);
+  const capabilities = await runCapabilityPreflight(sandbox, identity);
+  if (capabilities.created) {
+    console.info(
+      JSON.stringify({
+        event: "known-good-review.capability_preflight.completed",
+        digest: capabilities.preflight.digest,
+      }),
+    );
+  }
   return manifest;
 }

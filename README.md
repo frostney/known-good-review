@@ -80,8 +80,8 @@ Any currently listed AI Gateway language model with tool use is accepted;
 there is no model allowlist. Comma-separated IDs form an ordered fallback
 chain. `agents` is optional: a string applies one chain to every subagent,
 while a mapping can override exact `code-review` axes without creating a
-second lane system. `scout` and `commenter` default to
-`openai/gpt-5.6-luna` with xhigh reasoning and can be overridden like the axes:
+second lane system. `scout` defaults to `openai/gpt-5.6-luna` with xhigh
+reasoning and can be overridden like the axes:
 
 ```yaml
 model: openai/gpt-5.6-sol, anthropic/claude-opus-5
@@ -91,8 +91,10 @@ agents:
   engineering-quality: openai/gpt-5.6-sol
   discoverability: moonshotai/kimi-k3
   scout: openai/gpt-5.6-luna
-  commenter: openai/gpt-5.6-luna
 ```
+
+The former `agents.commenter` key remains accepted for configuration
+compatibility but is ignored; publication formatting is deterministic.
 
 `profile` changes inline publication volume without changing review depth or
 the canonical report. `focused` publishes Blocking and Important findings,
@@ -125,7 +127,11 @@ Each active review axis receives its own Check Run. Axis Checks report
 execution health only: in progress while working, success after complete
 evidence coverage, skipped when a conditional axis does not apply, and
 action-required when an active axis cannot complete. The aggregate Check owns
-the configured blocking policy.
+the configured blocking policy. Before lanes start, the app records one
+immutable capability preflight for the exact review. Every lane receives the
+same available-command list, repository markers, digest, and GitHub-only
+network boundary. GitHub presentation is derived deterministically from the
+validated v2 report without another model call.
 
 ## Local development
 

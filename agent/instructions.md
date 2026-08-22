@@ -29,8 +29,7 @@ Workflow, delegate again, or publish. It reads the prepared evidence and its
 checkpoint, performs only its assigned axis or finding revalidation, writes its
 checkpoint when applicable, and returns its worker report to the coordinator.
 A scout gathers only the bounded related-source, history, rendered-page, or web
-evidence requested by a lane. A commenter formats a reconciled canonical report
-for GitHub without changing facts, severity, status, IDs, or verdict.
+evidence requested by a lane.
 
 An authorized review-control continuation resumes a failed review in its
 existing session. Call `review_recovery` with `operation: read` and `stage:
@@ -54,11 +53,15 @@ with mismatched identity or invalid state fails closed.
 
 A successful root `verify_review_head` call triggers the application hook that
 prepares one integrity-checked evidence bundle in the shared Eve sandbox before
-the next model step. Use `read_review_evidence` to page the exact manifest and
-included patches. Never reconstruct the pull-request diff with Git, repeat
-classification in a child, or paste the complete bundle into a child message.
-Git and repository tools remain available for directly related source,
-history, tests, and probes.
+the next model step. The same application operation runs one immutable
+capability preflight for the exact review. Use `read_review_evidence` to page the
+exact manifest and included patches. Every lane packet includes the same
+preflight digest, available-command result, repository markers, and GitHub-only
+network boundary. Treat unavailable commands as known limitations instead of
+probing them again. Never reconstruct the pull-request diff with Git, repeat
+classification or capability probes in a child, or paste the complete bundle
+into a child message. Git and available repository tools remain usable for
+directly related source, history, tests, and probes.
 
 For every fresh review, use one `Workflow` program to run the built-in `agent`
 subagent for each axis in the dispatch envelope's exact `activeAxes`. Never add
@@ -142,20 +145,12 @@ call `review_recovery` with `operation: advance` and `stage: axes-complete`.
 The application validates every exact checkpoint before advancing. The
 coordinator then reads every exact checkpoint in one parallel tool-call batch
 using `operation: read` and `checkpoint: null`, reconciles their
-`completedReport` values into one canonical v2 report, then starts exactly one
-fresh built-in commenter call whose message begins with:
-
-`<known-good-review-routing>{"role":"commenter","attempt":0}</known-good-review-routing>`
-
-Give the commenter only the canonical active finding text and require a strict
-presentation object. Each title, evidence item, impact, and remedy is an array
-of exact-copy `text` or `code` segments. Joining segment values must reproduce
-the canonical visible text byte for byte. Filenames, including extensionless
-filenames, paths, variables, functions, and other code identifiers must be
-`code` segments. The commenter must not add, remove, paraphrase, reorder, or
-reclassify content. The coordinator passes that structured presentation and
-the unchanged canonical report to the single `publish_review` call. It performs
-no additional repository inspection or probes after Workflow returns. At
+`completedReport` values into one canonical v2 report. The coordinator passes
+only that unchanged report to the single `publish_review` call. The application
+derives presentation deterministically from canonical text and the finding's
+location path and symbol. No presentation model or formatting retry participates
+in publication. The coordinator performs no additional repository inspection
+or probes after Workflow returns. At
 coordinator step sixteen the application withdraws every capability except
 checkpoint reads and publication.
 Workflow exhaustion, a lane without a valid checkpoint, or a complete receipt

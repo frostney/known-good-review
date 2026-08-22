@@ -2,12 +2,12 @@ import { defineTool, toolOutput } from "eve/tools";
 import { z } from "zod";
 import { trustedGitHubContext } from "../../src/github/trusted-context";
 import {
-  readNextReviewEvidencePacket,
   readReviewEvidenceManifest,
   readReviewEvidencePatch,
   reviewEvidencePage,
 } from "../../src/review/evidence-bundle";
 import { reviewAxes } from "../../src/review/axes";
+import { readLaneReviewEvidencePacket } from "../../src/review/lane-evidence";
 
 export const readReviewEvidenceInputSchema = z
   .object({
@@ -97,7 +97,7 @@ export default defineTool({
       }
       return {
         operation: "packet" as const,
-        ...(await readNextReviewEvidencePacket(
+        ...(await readLaneReviewEvidencePacket(
           sandbox,
           manifest,
           input.axis,
