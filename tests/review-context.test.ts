@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { readReviewEvidenceInputSchema } from "../agent/tools/read_review_evidence";
 import { reviewLaneCheckpointInputSchema } from "../agent/tools/review_lane_checkpoint";
+import { reviewRecoveryInputSchema } from "../agent/tools/review_recovery";
 import {
   readReviewEvidenceManifest,
   readNextReviewEvidencePacket,
@@ -78,6 +79,10 @@ describe("review evidence bundle", () => {
     expect(
       z.toJSONSchema(reviewLaneCheckpointInputSchema).required,
     ).toContain("checkpoint");
+    expect(z.toJSONSchema(reviewRecoveryInputSchema).required).toEqual([
+      "operation",
+      "stage",
+    ]);
     expect(z.toJSONSchema(readReviewEvidenceInputSchema).required).toEqual([
       "operation",
       "path",
@@ -116,6 +121,18 @@ describe("review evidence bundle", () => {
       reviewLaneCheckpointInputSchema.safeParse({
         operation: "read",
         axis: "engineering-quality",
+      }).success,
+    ).toBeFalse();
+    expect(
+      reviewRecoveryInputSchema.safeParse({
+        operation: "read",
+        stage: null,
+      }).success,
+    ).toBeTrue();
+    expect(
+      reviewRecoveryInputSchema.safeParse({
+        operation: "advance",
+        stage: null,
       }).success,
     ).toBeFalse();
   });

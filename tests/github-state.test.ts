@@ -23,6 +23,11 @@ import {
   withFreshReviewSessions,
 } from "../src/github/session-routing";
 import { reviewContextAttributes } from "../src/github/trusted-context";
+import {
+  advanceReviewRecovery,
+  beginReviewRecovery,
+  buildReviewFailureEnvelope,
+} from "../src/review/recovery";
 
 function reviewAuth(
   kind: "delta" | "full",
@@ -88,6 +93,34 @@ describe("GitHub-owned state and telemetry", () => {
     expect(encoded).toContain("No findings were reported.");
     expect(decodeReviewState(encoded)).toEqual(state);
     expect(decodeReviewState("ordinary comment")).toBeNull();
+
+    const recovery = advanceReviewRecovery(
+      beginReviewRecovery({
+        activeAxes: ["engineering-quality"],
+        identity: {
+          baseSha: "1".repeat(40),
+          headSha: "2".repeat(40),
+          patchFingerprint: "3".repeat(64),
+          planKind: "delta",
+        },
+        selectedFindingIds: ["CR-7"],
+      }),
+      {
+        completedAxes: ["engineering-quality"],
+        stage: "axes-complete",
+      },
+    );
+    const failed = {
+      ...state,
+      failure: buildReviewFailureEnvelope({
+        errorClass: "WORKFLOW_INCOMPLETE",
+        recovery,
+        run: { sessionId: "session-safe", turnId: "turn-safe" },
+      }),
+    };
+    const encodedFailure = encodeReviewState(failed);
+    expect(encodedFailure).toContain("review incomplete");
+    expect(decodeReviewState(encodedFailure)).toEqual(failed);
   });
 
   test("shows accepted review progress instead of an empty state comment", () => {

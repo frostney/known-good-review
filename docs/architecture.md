@@ -149,6 +149,12 @@ turn that did not publish a validated artifact becomes a failed Check; an
 initial failure marks the baseline lost so a later webhook cannot silently run
 a second full review.
 
+A current-head failure also records a bounded, sanitized envelope beside the
+unchanged successful baseline. It binds the failed stage and completed axes to
+the trusted base, head, effective patch, plan, session, turn, and recovery
+revision. Authorized continuation reuses only matching durable session state
+and lane checkpoints; token-limit failures remain ineligible.
+
 ## Sandbox and telemetry
 
 The Vercel/microsandbox backends allow only GitHub domains and deny private

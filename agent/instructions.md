@@ -32,6 +32,12 @@ A scout gathers only the bounded related-source, history, rendered-page, or web
 evidence requested by a lane. A commenter formats a reconciled canonical report
 for GitHub without changing facts, severity, status, IDs, or verdict.
 
+An authorized review-control continuation resumes a failed review in its
+existing session. Call `review_recovery` with `operation: read` and `stage:
+null` first. Perform only its `remainingWork`. Do not delegate an axis listed in
+`completedAxes`; read and reconcile that exact checkpoint instead. A recovery
+with mismatched identity or invalid state fails closed.
+
 - `cancel`: do no review work and finish. The steering delivery has already
   cancelled stale work.
 - `cleanup`: call `cleanup_review` once and finish.
@@ -131,11 +137,13 @@ array. The terminal report follows
 the skill's worker return contract and lives only in the checkpoint.
 Loop only on an explicit `incomplete` result; Eve already retries supported
 transient failures, and a terminal child failure must fail closed instead of
-restarting uncheckpointed work. After Workflow reports every axis complete, the
-coordinator reads every exact checkpoint in one parallel tool-call batch using
-`operation: read` and `checkpoint: null`, reconciles their `completedReport`
-values into one canonical v2 report, then starts exactly one fresh built-in
-commenter call whose message begins with:
+restarting uncheckpointed work. After Workflow reports every axis complete,
+call `review_recovery` with `operation: advance` and `stage: axes-complete`.
+The application validates every exact checkpoint before advancing. The
+coordinator then reads every exact checkpoint in one parallel tool-call batch
+using `operation: read` and `checkpoint: null`, reconciles their
+`completedReport` values into one canonical v2 report, then starts exactly one
+fresh built-in commenter call whose message begins with:
 
 `<known-good-review-routing>{"role":"commenter","attempt":0}</known-good-review-routing>`
 
@@ -179,6 +187,11 @@ The model router applies a scalar `agents` chain to revalidation. A per-axis
 mapping does not create another finding model system; revalidation then uses
 the coordinator chain.
 
+After every selected prior finding has been revalidated, call
+`review_recovery` with `operation: advance` and `stage:
+revalidation-complete`. A review with no selected prior findings skips this
+stage.
+
 For every finding, set `location.path` to the changed file and
 `location.line` to the exact head-side line in the pull-request diff that best
 demonstrates the problem. Prefer a changed line; a visible context line is
@@ -191,8 +204,10 @@ prior finding with its current status, and every unchanged carry-forward
 finding. Preserve stable prior IDs; allocate new IDs above the highest prior
 number. A resolved prior finding remains in this result with `status: fixed`, a
 still-present or changed one remains `open` or `deferred`, and a not-retestable
-one remains `deferred` with the limitation recorded. Call `publish_review`
-exactly once. It validates the artifact and derives repository, pull request,
+one remains `deferred` with the limitation recorded. After the canonical report
+is fully reconciled, call `review_recovery` with `operation: advance` and
+`stage: report-reconciled`. Then call `publish_review` exactly once. It
+validates the artifact and derives repository, pull request,
 head, and Check
 Run identity from trusted channel context. Do not post a prose review or use
 GitHub APIs from the repository sandbox.
