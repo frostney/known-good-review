@@ -22,9 +22,10 @@ export const defaultEmbedding: EmbeddingConfig = {
 export type ModelChain = readonly [string, ...string[]];
 export const reviewProfiles = ["focused", "balanced", "thorough"] as const;
 export type ReviewProfile = (typeof reviewProfiles)[number];
-export const specialistRoles = ["scout", "commenter"] as const;
+export const specialistRoles = ["scout"] as const;
 export type SpecialistRole = (typeof specialistRoles)[number];
 export type ReviewAgentRole = ReviewAxis | SpecialistRole;
+type AcceptedReviewAgentRole = ReviewAgentRole | "commenter";
 
 export interface ReviewConfig {
   readonly model: ModelChain;
@@ -55,11 +56,11 @@ const rawConfigSchema = z
         z
           .object(
             Object.fromEntries(
-              [...reviewAxes, ...specialistRoles].map((role) => [
+              [...reviewAxes, ...specialistRoles, "commenter"].map((role) => [
                 role,
                 z.string().optional(),
               ]),
-            ) as Record<ReviewAgentRole, z.ZodOptional<z.ZodString>>,
+            ) as Record<AcceptedReviewAgentRole, z.ZodOptional<z.ZodString>>,
           )
           .strict(),
       ])
@@ -180,6 +181,9 @@ export function parseReviewConfig(source: string | null | undefined): ReviewConf
   }
 
   const models: Partial<Record<ReviewAgentRole, ModelChain>> = {};
+  if (agents.commenter !== undefined) {
+    parseModelChain(agents.commenter, "agents.commenter");
+  }
   for (const role of [...reviewAxes, ...specialistRoles]) {
     const configured = agents[role];
     if (configured !== undefined) {

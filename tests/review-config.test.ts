@@ -47,9 +47,7 @@ blocking: true
     expect(modelsForSpecialist(config, "scout")).toEqual([
       "openai/gpt-5.6-luna",
     ]);
-    expect(modelsForSpecialist(config, "commenter")).toEqual([
-      "xai/grok-code-fast-1",
-    ]);
+    expect(config.agents.kind === "axes" && "commenter" in config.agents.models).toBeFalse();
     expect(config.profile).toBe("thorough");
     expect(config.blocking).toBeTrue();
   });

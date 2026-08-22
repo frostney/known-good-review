@@ -4,6 +4,7 @@ import { z } from "zod";
 import { readReviewEvidenceInputSchema } from "../agent/tools/read_review_evidence";
 import { reviewLaneCheckpointInputSchema } from "../agent/tools/review_lane_checkpoint";
 import { reviewRecoveryInputSchema } from "../agent/tools/review_recovery";
+import { publishReviewInputSchema } from "../agent/tools/publish_review";
 import {
   readReviewEvidenceManifest,
   readNextReviewEvidencePacket,
@@ -88,6 +89,9 @@ describe("review evidence bundle", () => {
       "path",
       "axis",
       "cursor",
+    ]);
+    expect(z.toJSONSchema(publishReviewInputSchema).required).toEqual([
+      "report",
     ]);
     expect(z.toJSONSchema(laneCheckpointContentSchema).required).toContain(
       "completedReport",

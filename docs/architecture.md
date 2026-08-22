@@ -10,7 +10,7 @@ flowchart LR
   GI --> MD["Installation memory deletion"]
   EC --> LC["Deterministic lifecycle and trusted config"]
   LC --> ER["Eve coordinator"]
-  ER --> WF["Workflow axes, scouts, and commenter"]
+  ER --> WF["Workflow axes and scouts"]
   ER --> VS["Persistent Vercel Sandbox"]
   ER --> AG["Vercel AI Gateway"]
   ER --> CM["Convex RAG memory"]
@@ -50,12 +50,13 @@ head, installation, or Check name as model input.
 
 The coordinator loads the vendored `code-review` skill and maps active axes
 one-to-one to Eve's built-in subagent. After the root revalidates the exact PR
-head, an Eve `action.result` hook prepares the classified patch once in the
-shared sandbox without putting preparation commands or raw patches in model
-history. Lanes page an integrity-checked manifest and bounded patch chunks
-instead of independently reconstructing the diff.
-Child routing envelopes contain an exact skill axis or the `revalidation`,
-`scout`, or `commenter` role.
+head, an Eve `action.result` hook prepares the classified patch and one
+immutable capability preflight in the shared sandbox without putting
+preparation commands or raw patches in model history. Every lane receives the
+same preflight with its bounded evidence packet instead of probing unavailable
+commands again. Lanes page an integrity-checked manifest and bounded patch
+chunks instead of independently reconstructing the diff. Child routing
+envelopes contain an exact skill axis or the `revalidation` or `scout` role.
 Dynamic model routing maps these roles directly to trusted `agents`
 configuration.
 
@@ -81,10 +82,9 @@ state service.
 
 When a lane needs bounded related-source, history, rendered-page, or web
 evidence, the coordinator starts a fresh routed scout and passes its compact
-evidence to the next fresh lane. After all axis reports reconcile, one fresh
-commenter converts canonical text into exact-copy text/code segments. The app
-validates that no fact changed, renders code identifiers with inline code, and
-then publishes once.
+evidence to the next fresh lane. After all axis reports reconcile, the app
+derives exact-copy text and code segments deterministically from canonical
+finding text, location paths, and symbols, then publishes once.
 
 Eve compacts a lane at 25 percent of the selected model's context window. The
 percentage adapts to arbitrary Gateway models while leaving enough room for a

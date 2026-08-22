@@ -97,13 +97,13 @@ describe("dynamic Eve model routing", () => {
     ).toThrow("outside the trusted chain");
   });
 
-  test("routes specialist copies to Luna with xhigh OpenAI reasoning", () => {
+  test("routes scout copies to Luna with xhigh OpenAI reasoning", () => {
     expect(
       selectRoutedModel({
         attributes: { [routingAttribute]: config },
         channelKind: "subagent",
         messages: childMessage(
-          routingEnvelope({ role: "commenter", attempt: 0 }),
+          routingEnvelope({ role: "scout", attempt: 0 }),
         ),
       }),
     ).toEqual({

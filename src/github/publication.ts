@@ -17,11 +17,6 @@ import {
   publishedFindings,
   reviewFindingCountSummary,
 } from "./review-presentation";
-import {
-  validateCommenterPresentation,
-  type CommenterFindingPresentation,
-  type CommenterPresentation,
-} from "./commenter-presentation";
 import { reviewAxes, type ReviewAxis } from "../review/axes";
 import { findingIdentity } from "../review/finding-identity";
 import type { ReviewFailureEnvelope } from "../review/recovery";
@@ -713,7 +708,6 @@ async function reconcileFindingComments(
   context: TrustedGitHubContext,
   report: ReviewReport,
   config: Pick<ReviewConfig, "blocking" | "profile">,
-  presentation: CommenterPresentation | null,
   files: readonly PullRequestFileForComment[],
 ): Promise<() => Promise<void>> {
   const comments = await octokit.paginate(octokit.rest.pulls.listReviewComments, {
@@ -743,9 +737,6 @@ async function reconcileFindingComments(
   );
   const findings = publishedFindings(report, config.profile);
   const active = new Set(findings.map(findingIdentity));
-  const presentationById = new Map(
-    presentation?.findings.map((finding) => [finding.id, finding] as const) ?? [],
-  );
   const newThreads: NewReviewThread[] = [];
   const commentUpdates: Array<{ readonly body: string; readonly id: number }> = [];
   const resolutions: Array<{
@@ -757,11 +748,7 @@ async function reconcileFindingComments(
   for (const finding of findings) {
     const identity = findingIdentity(finding);
     const location = reviewCommentLocation(finding, files);
-    const body = findingBody(
-      finding,
-      location.subjectType,
-      presentationById.get(finding.id),
-    );
+    const body = findingBody(finding, location.subjectType);
     const prior = existing.get(identity);
     if (prior && sameCommentLocation(prior, finding, location)) {
       if (prior.body !== body) {
@@ -973,7 +960,6 @@ export async function publishReview(input: {
   readonly config?: Pick<ReviewConfig, "blocking" | "profile">;
   readonly context: TrustedGitHubContext;
   readonly octokit: OctokitClient;
-  readonly presentation?: CommenterPresentation | null;
   readonly reconcileFindings?: boolean;
   readonly report: ReviewReport;
 }): Promise<{ readonly checkUrl: string; readonly findingCount: number }> {
@@ -983,9 +969,6 @@ export async function publishReview(input: {
     );
   }
   const config = input.config ?? { blocking: false, profile: "balanced" as const };
-  const presentation = input.presentation
-    ? validateCommenterPresentation(input.report, input.presentation)
-    : null;
   const changed = await input.octokit.paginate(
     input.octokit.rest.pulls.listFiles,
     {
@@ -1002,7 +985,6 @@ export async function publishReview(input: {
       input.context,
       input.report,
       config,
-      presentation,
       changed,
     );
   } else if (config.blocking) {

@@ -1,0 +1,131 @@
+import { describe, expect, test } from "bun:test";
+import {
+  capabilityCommandNames,
+  capabilityPreflightPath,
+  readCapabilityPreflight,
+  runCapabilityPreflight,
+} from "../src/review/capability-preflight";
+import { readLaneReviewEvidencePacket } from "../src/review/lane-evidence";
+
+const identity = {
+  baseSha: "1".repeat(40),
+  headSha: "2".repeat(40),
+  patchFingerprint: "3".repeat(64),
+};
+
+function sandbox() {
+  const files = new Map<string, string>();
+  const commands: string[] = [];
+  return {
+    commands,
+    files,
+    runtime: {
+      async removePath() {},
+      async readTextFile({ path }: { readonly path: string }) {
+        return files.get(path) ?? null;
+      },
+      async run({ command }: { readonly command: string }) {
+        commands.push(command);
+        return {
+          exitCode: 0,
+          stderr: "",
+          stdout: [
+            ...capabilityCommandNames.map(
+              (name) => `command\t${name}\t${name === "git" || name === "fpc" ? "1" : "0"}`,
+            ),
+            "marker\tMakefile\t1",
+          ].join("\n"),
+        };
+      },
+      async writeTextFile({
+        path,
+        content,
+      }: {
+        readonly path: string;
+        readonly content: string;
+      }) {
+        files.set(path, content);
+      },
+    },
+  };
+}
+
+describe("review capability preflight", () => {
+  test("runs once and returns the same immutable result to later readers", async () => {
+    const observed = sandbox();
+    const first = await runCapabilityPreflight(observed.runtime, identity);
+    const second = await runCapabilityPreflight(observed.runtime, identity);
+
+    expect(first.created).toBeTrue();
+    expect(second.created).toBeFalse();
+    expect(observed.commands).toHaveLength(1);
+    expect(second.preflight).toEqual(first.preflight);
+    expect(first.preflight.network).toBe("github-only");
+    expect(first.preflight.repositoryMarkers).toEqual(["Makefile"]);
+    expect(
+      first.preflight.commands.find((command) => command.name === "fpc"),
+    ).toEqual({ name: "fpc", available: true });
+  });
+
+  test("rejects a modified or mismatched preflight", async () => {
+    const observed = sandbox();
+    await runCapabilityPreflight(observed.runtime, identity);
+    const path = capabilityPreflightPath(identity.patchFingerprint);
+    const parsed = JSON.parse(observed.files.get(path) ?? "{}") as {
+      headSha: string;
+    };
+    observed.files.set(path, JSON.stringify({ ...parsed, headSha: "4".repeat(40) }));
+
+    await expect(readCapabilityPreflight(observed.runtime, identity)).rejects.toThrow(
+      "does not match",
+    );
+  });
+
+  test("provides the same preflight to every lane packet", async () => {
+    const observed = sandbox();
+    await runCapabilityPreflight(observed.runtime, identity);
+    const manifest = { schemaVersion: 1 as const, ...identity, entries: [] };
+
+    const engineering = await readLaneReviewEvidencePacket(
+      observed.runtime,
+      manifest,
+      "engineering-quality",
+      "engineering-session",
+    );
+    const specification = await readLaneReviewEvidencePacket(
+      observed.runtime,
+      manifest,
+      "claim-and-specification",
+      "specification-session",
+    );
+
+    expect(engineering.capabilityPreflight).toEqual(
+      specification.capabilityPreflight,
+    );
+    expect(engineering.capabilityPreflight.digest).toBe(
+      specification.capabilityPreflight.digest,
+    );
+    expect(observed.commands).toHaveLength(1);
+  });
+
+  test("does not advance lane evidence when preflight validation fails", async () => {
+    const observed = sandbox();
+    await runCapabilityPreflight(observed.runtime, identity);
+    const path = capabilityPreflightPath(identity.patchFingerprint);
+    const parsed = JSON.parse(observed.files.get(path) ?? "{}") as {
+      headSha: string;
+    };
+    observed.files.set(path, JSON.stringify({ ...parsed, headSha: "4".repeat(40) }));
+    const filesBefore = [...observed.files.keys()];
+
+    await expect(
+      readLaneReviewEvidencePacket(
+        observed.runtime,
+        { schemaVersion: 1, ...identity, entries: [] },
+        "engineering-quality",
+        "failed-session",
+      ),
+    ).rejects.toThrow("does not match");
+    expect([...observed.files.keys()]).toEqual(filesBefore);
+  });
+});

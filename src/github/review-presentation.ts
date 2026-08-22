@@ -4,8 +4,7 @@ import { findingIdentity } from "../review/finding-identity";
 import {
   deterministicFindingPresentation,
   renderRichText,
-  type CommenterFindingPresentation,
-} from "./commenter-presentation";
+} from "./deterministic-presentation";
 
 const severityEmoji: Readonly<Record<ReviewFinding["severity"], string>> = {
   BLOCKING: "🚨",
@@ -74,9 +73,8 @@ function titleCase(value: string): string {
 export function findingBody(
   finding: ReviewFinding,
   placement: "file" | "line" = "line",
-  suppliedPresentation?: CommenterFindingPresentation,
 ): string {
-  const presentation = suppliedPresentation ?? deterministicFindingPresentation(finding);
+  const presentation = deterministicFindingPresentation(finding);
   const status = finding.status === "open" ? "Open" : titleCase(finding.status);
   return [
     `<!-- known-good-review:finding:v2:${findingIdentity(finding)}:${finding.id} -->`,

@@ -16,7 +16,7 @@ export type ReviewRoute =
   | { readonly role: "coordinator"; readonly attempt: number }
   | { readonly role: "lane"; readonly axis: ReviewAxis; readonly attempt: number }
   | { readonly role: "revalidation"; readonly attempt: number }
-  | { readonly role: "scout" | "commenter"; readonly attempt: number };
+  | { readonly role: "scout"; readonly attempt: number };
 
 function textFromMessage(message: ModelMessage): string {
   if (typeof message.content === "string") {
@@ -61,7 +61,7 @@ export function parseSubagentRoute(messages: readonly ModelMessage[]): ReviewRou
   }
   const role = parsed.role;
   const attempt = parseAttempt("attempt" in parsed ? parsed.attempt : 0);
-  if (role === "revalidation" || role === "scout" || role === "commenter") {
+  if (role === "revalidation" || role === "scout") {
     return { role, attempt };
   }
   if (role === "lane" && "axis" in parsed && typeof parsed.axis === "string") {
@@ -71,7 +71,7 @@ export function parseSubagentRoute(messages: readonly ModelMessage[]): ReviewRou
     return { role, axis: parsed.axis, attempt };
   }
   throw new Error(
-    "Review subagent routing role must be lane, revalidation, scout, or commenter",
+    "Review subagent routing role must be lane, revalidation, or scout",
   );
 }
 
@@ -82,7 +82,7 @@ export function chainForRoute(
   if (route.role === "lane") {
     return modelsForAxis(config, route.axis);
   }
-  if (route.role === "scout" || route.role === "commenter") {
+  if (route.role === "scout") {
     return modelsForSpecialist(config, route.role);
   }
   if (route.role === "revalidation" && config.agents.kind === "all") {
@@ -133,8 +133,7 @@ export function selectRoutedModel(input: {
     ...(fallbacks.length > 0 ? { models: fallbacks } : {}),
   };
   const specialistOpenAi =
-    (route.role === "scout" || route.role === "commenter") &&
-    model.startsWith("openai/");
+    route.role === "scout" && model.startsWith("openai/");
   return {
     model,
     modelOptions: {
