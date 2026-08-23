@@ -43,6 +43,12 @@ flowchart TD
   envelope. An authorized `@known-good-review continue` resumes only recorded
   missing stages in the same durable session; mismatched or ineligible state
   fails closed.
+- Selected-finding outcomes are persisted separately from coordinator history.
+  Typed application code merges them with the prior baseline and fresh finding
+  content, injects trusted identity, derives stable IDs and the verdict, then
+  stages the validated report beside the unchanged baseline before publication.
+  A publication-only continuation retries GitHub directly without a model or
+  completed review work.
 
 One visible GitHub summary comment also holds the hidden authoritative versioned
 review state and complete v2 findings artifact. Convex stores advisory,
@@ -132,6 +138,8 @@ immutable capability preflight for the exact review. Every lane receives the
 same available-command list, repository markers, digest, and GitHub-only
 network boundary. GitHub presentation is derived deterministically from the
 validated v2 report without another model call.
+The publication tool accepts no report or target from the model. It loads only
+the application-staged report after exact review identity validation.
 
 ## Local development
 

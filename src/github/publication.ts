@@ -7,7 +7,11 @@ import {
   type ReviewState,
 } from "./review-state";
 import type { TrustedGitHubContext } from "./trusted-context";
-import type { ReviewFinding, ReviewReport } from "../review/findings";
+import {
+  reviewReportSchema,
+  type ReviewFinding,
+  type ReviewReport,
+} from "../review/findings";
 import {
   effectivePatchFileFingerprints,
   type PatchFile,
@@ -20,6 +24,10 @@ import {
 import { reviewAxes, type ReviewAxis } from "../review/axes";
 import { findingIdentity } from "../review/finding-identity";
 import type { ReviewFailureEnvelope } from "../review/recovery";
+import {
+  reportAssemblyIdentitySchema,
+  type ReportAssemblyIdentity,
+} from "../review/report-assembly";
 
 export { findingBody } from "./review-presentation";
 
@@ -896,6 +904,121 @@ export async function writeReviewState(
   });
 }
 
+export async function readLatestReviewState(
+  octokit: OctokitClient,
+  context: Pick<TrustedGitHubContext, "owner" | "repo" | "pullRequest">,
+): Promise<ReviewState | null> {
+  const comments = await octokit.paginate(octokit.rest.issues.listComments, {
+    owner: context.owner,
+    repo: context.repo,
+    issue_number: context.pullRequest,
+    per_page: 100,
+  });
+  return (
+    comments
+      .filter((comment) => isReviewStateComment(comment.body ?? ""))
+      .map((comment) => decodeReviewState(comment.body ?? ""))
+      .filter(
+        (state): state is ReviewState =>
+          state !== null && state.pullRequest === context.pullRequest,
+      )
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] ??
+    null
+  );
+}
+
+export function validateReportPublicationIdentity(
+  context: TrustedGitHubContext,
+  identity: ReportAssemblyIdentity,
+): ReportAssemblyIdentity {
+  const parsed = reportAssemblyIdentitySchema.parse(identity);
+  if (
+    !context.patchFingerprint ||
+    parsed.repositoryId !== context.repositoryId ||
+    parsed.pullRequest !== context.pullRequest ||
+    parsed.baseSha !== context.baseSha ||
+    parsed.headSha !== context.headSha ||
+    parsed.patchFingerprint !== context.patchFingerprint
+  ) {
+    throw new Error(
+      "Pending review publication does not match the trusted review",
+    );
+  }
+  return parsed;
+}
+
+export function pendingPublicationRetry(
+  state: ReviewState,
+  context: TrustedGitHubContext,
+): NonNullable<ReviewState["pendingPublication"]> | null {
+  if (
+    state.baseline?.head === context.headSha &&
+    state.failure === undefined
+  ) {
+    return null;
+  }
+  if (
+    state.failure?.failedStage !== "publication" ||
+    !state.pendingPublication
+  ) {
+    return null;
+  }
+  validateReportPublicationIdentity(context, state.pendingPublication.identity);
+  return state.pendingPublication;
+}
+
+export async function stageReviewPublication(input: {
+  readonly context: TrustedGitHubContext;
+  readonly identity: ReportAssemblyIdentity;
+  readonly octokit: OctokitClient;
+  readonly report: ReviewReport;
+}): Promise<ReviewState> {
+  const identity = validateReportPublicationIdentity(
+    input.context,
+    input.identity,
+  );
+  const report = reviewReportSchema.parse(input.report);
+  if (
+    report.scope.base !== identity.baseSha ||
+    report.scope.head !== identity.headSha
+  ) {
+    throw new Error("Pending review report does not match its trusted identity");
+  }
+  const current = await readLatestReviewState(input.octokit, input.context);
+  const next: ReviewState = {
+    ...(current ?? {
+      schemaVersion: 2 as const,
+      app: checkName,
+      pullRequest: input.context.pullRequest,
+      initialFullStatus: "running" as const,
+      baseline: null,
+    }),
+    pendingPublication: {
+      identity,
+      report,
+      stagedAt: new Date().toISOString(),
+    },
+    updatedAt: new Date().toISOString(),
+  };
+  await writeReviewState(input.octokit, input.context, next);
+  return next;
+}
+
+export async function pendingReviewPublication(input: {
+  readonly context: TrustedGitHubContext;
+  readonly octokit: OctokitClient;
+}): Promise<NonNullable<ReviewState["pendingPublication"]>> {
+  const state = await readLatestReviewState(input.octokit, input.context);
+  if (!state?.pendingPublication) {
+    throw new Error("No validated review report is pending publication");
+  }
+  validateReportPublicationIdentity(
+    input.context,
+    state.pendingPublication.identity,
+  );
+  return state.pendingPublication;
+}
+
 export async function writeReviewFailureState(input: {
   readonly context: TrustedGitHubContext;
   readonly failure: ReviewFailureEnvelope;
@@ -920,23 +1043,7 @@ export async function writeReviewFailureState(input: {
   ) {
     throw new Error("Review failure state no longer targets the current head");
   }
-  const comments = await input.octokit.paginate(
-    input.octokit.rest.issues.listComments,
-    {
-      owner: input.context.owner,
-      repo: input.context.repo,
-      issue_number: input.context.pullRequest,
-      per_page: 100,
-    },
-  );
-  const current = comments
-    .filter((comment) => isReviewStateComment(comment.body ?? ""))
-    .map((comment) => decodeReviewState(comment.body ?? ""))
-    .filter(
-      (state): state is ReviewState =>
-        state !== null && state.pullRequest === input.context.pullRequest,
-    )
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+  const current = await readLatestReviewState(input.octokit, input.context);
   if (current?.baseline?.head === input.context.headSha && !current.failure) {
     return;
   }

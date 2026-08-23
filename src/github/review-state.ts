@@ -2,6 +2,7 @@ import { z } from "zod";
 import { reviewProfiles } from "../config/review-config";
 import { reviewReportSchema } from "../review/findings";
 import { reviewFailureEnvelopeSchema } from "../review/recovery";
+import { reportAssemblyIdentitySchema } from "../review/report-assembly";
 import {
   reviewProgressBody,
   reviewResultBody,
@@ -35,6 +36,13 @@ export const reviewStateSchema = z.object({
       report: reviewReportSchema,
     })
     .nullable(),
+  pendingPublication: z
+    .object({
+      identity: reportAssemblyIdentitySchema,
+      report: reviewReportSchema,
+      stagedAt: z.string().datetime(),
+    })
+    .optional(),
   failure: reviewFailureEnvelopeSchema.optional(),
   updatedAt: z.string().datetime(),
 });

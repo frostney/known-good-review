@@ -27,6 +27,7 @@ import {
 import {
   checkName,
   parseActiveReviewExternalId,
+  pendingPublicationRetry,
   publishFailClosedCheck,
   publishInProgressCheck,
   publishReview,
@@ -41,6 +42,8 @@ import type { ReviewAxis } from "../../src/review/axes";
 import { discoverabilityApplies } from "../../src/review/discoverability";
 import { effectivePatchFingerprint } from "../../src/review/effective-patch";
 import { withFreshReviewSessions } from "../../src/github/session-routing";
+import { publishPendingReview } from "../lib/publish-review";
+import { currentReviewReportState } from "../lib/review-report";
 
 const supportedActions = new Set([
   "closed",
@@ -301,6 +304,7 @@ async function trustedReviewControlAuth(ctx: GitHubInboundContext) {
           supersedesActiveReview: true,
         }
       : { kind: "delta" as const, revalidatePriorFindings: true as const };
+  const config = parseReviewConfig(configSource);
   const reviewFiles = patchFiles
     .filter(
       (file) =>
@@ -308,17 +312,57 @@ async function trustedReviewControlAuth(ctx: GitHubInboundContext) {
         deltaDispatch?.changedFiles.includes(file.path),
     )
     .map((file) => ({ path: file.path, status: file.status }));
+  const reviewedPaths = reviewFiles.map((file) => file.path);
+  const configuredAxes: ReviewAxis[] = [
+    "deduplication",
+    "claim-and-specification",
+    "engineering-quality",
+  ];
+  if (discoverabilityApplies(reviewedPaths, config.publicRoots)) {
+    configuredAxes.push("discoverability");
+  }
+  const pendingIdentity =
+    state.kind === "valid"
+      ? state.state.pendingPublication?.identity
+      : undefined;
+  const activeAxes =
+    failure?.activeAxes ?? pendingIdentity?.activeAxes ?? configuredAxes;
+  const selectedFindingIds =
+    failure?.selectedFindingIds ??
+    pendingIdentity?.selectedFindingIds ??
+    (activeReview.kind === "delta" && deltaDispatch?.priorReport
+      ? findingsToRevalidate(
+          deltaDispatch.priorReport.findings,
+          new Set(deltaDispatch.changedFiles),
+        ).map((finding) => finding.id)
+      : []);
 
-  return withTrustedReviewContext(defaultGitHubAuth(ctx), {
+  const auth = withTrustedReviewContext(defaultGitHubAuth(ctx), {
     baseSha: pullRequest.base.sha,
     configSource,
     event: "review-control-response",
     headSha: pullRequest.head.sha,
     patchFingerprint,
-    plan: JSON.stringify(plan),
+    plan: JSON.stringify({ ...plan, activeAxes, selectedFindingIds }),
     ...repositoryDetails,
     reviewFiles,
   });
+  const context = publicationContext(
+    ctx,
+    pullRequestNumber,
+    pullRequest.base.sha,
+    pullRequest.head.sha,
+    repositoryDetails.repositoryId,
+    repositoryDetails.repositoryCreatedAt,
+    patchFingerprint,
+  );
+  return {
+    auth,
+    config,
+    context,
+    octokit: githubAdapter(context.installationId).octokit,
+    state,
+  };
 }
 
 async function dispatchReview(input: {
@@ -584,7 +628,68 @@ async function onComment(ctx: GitHubInboundContext, comment: GitHubComment) {
     }
     if (control === "stop") return { auth: defaultGitHubAuth(ctx) };
     try {
-      return { auth: await trustedReviewControlAuth(ctx) };
+      const restored = await trustedReviewControlAuth(ctx);
+      if (
+        restored.state.kind === "valid" &&
+        restored.state.state.baseline?.head === restored.context.headSha &&
+        !restored.state.state.failure
+      ) {
+        await ctx.thread.post("The current-head review is already published.");
+        return null;
+      }
+      const failure =
+        restored.state.kind === "valid"
+          ? restored.state.state.failure
+          : undefined;
+      if (failure?.failedStage === "publication") {
+        const pending = restored.state.kind === "valid"
+          ? pendingPublicationRetry(restored.state.state, restored.context)
+          : null;
+        const staged = pending
+          ? null
+          : currentReviewReportState(restored.auth);
+        if (pending?.report ?? staged?.report) {
+          try {
+            await publishPendingReview({
+              config: restored.config,
+              context: restored.context,
+              octokit: restored.octokit,
+              ...(staged ? { staged } : {}),
+            });
+          } catch (error) {
+            console.error("known-good-review publication retry failed", error);
+            try {
+              await publishFailClosedCheck({
+                context: restored.context,
+                message:
+                  "Publication retry failed. The validated report remains staged and no review work was rerun.",
+                octokit: restored.octokit,
+              });
+              await ctx.thread.post(
+                "Publication retry failed. The validated report remains staged for another model-free retry.",
+              );
+            } catch (reportingError) {
+              console.error(
+                "known-good-review could not report publication retry failure",
+                reportingError,
+              );
+            }
+            return null;
+          }
+          try {
+            await ctx.thread.post(
+              "Publication resumed from the validated application-owned report. No review lanes or model work were rerun.",
+            );
+          } catch (error) {
+            console.warn(
+              "known-good-review could not acknowledge successful publication retry",
+              error,
+            );
+          }
+          return null;
+        }
+      }
+      return { auth: restored.auth };
     } catch (error) {
       console.error("known-good-review could not restore review context", error);
       await ctx.thread.post(

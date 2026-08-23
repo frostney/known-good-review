@@ -53,6 +53,9 @@ describe("interrupted review recovery", () => {
     });
     const failure = buildReviewFailureEnvelope({
       errorClass: "WORKFLOW_INCOMPLETE",
+      diagnostics: [
+        { code: "invalid_type", path: ["freshFindings", 0, "title"] },
+      ],
       recovery: advanceReviewRecovery(started, {
         completedAxes: ["engineering-quality"],
         stage: "axes-complete",
@@ -66,6 +69,9 @@ describe("interrupted review recovery", () => {
       activeAxes: ["engineering-quality"],
       completedAxes: ["engineering-quality"],
       errorClass: "WORKFLOW_INCOMPLETE",
+      diagnostics: [
+        { code: "invalid_type", path: ["freshFindings", 0, "title"] },
+      ],
     });
     expect(JSON.stringify(failure)).not.toContain("prompt");
     expect(JSON.stringify(failure).length).toBeLessThan(4_096);
