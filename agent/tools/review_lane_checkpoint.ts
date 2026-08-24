@@ -15,6 +15,7 @@ import {
 } from "../../src/review/evidence-bundle";
 import { githubAdapter } from "../../src/github/chat-adapter";
 import { publishAxisCheckpoint } from "../../src/github/publication";
+import { currentLaneCheckpointIdentity } from "../lib/review-evidence";
 
 export const reviewLaneCheckpointInputSchema = z
   .object({
@@ -47,7 +48,7 @@ export const reviewLaneCheckpointInputSchema = z
 
 export default defineTool({
   description:
-    "Read or replace the compact checkpoint for one exact review axis. A fresh lane continuation reads this first and reconciles it with the immutable evidence manifest. Write one checkpoint before returning complete or requesting a fresh continuation. Checkpoints preserve coverage, evidence-backed observations, remaining work, and limitations without preserving raw tool history.",
+    "Read or replace the compact checkpoint for one exact review axis. The application binds each checkpoint to the immutable evidence-ledger digest. A fresh lane continuation reads this first and reconciles it with the exact manifest. Write one checkpoint before returning complete or requesting a fresh continuation. Checkpoints preserve coverage, evidence-backed observations, remaining work, and limitations without preserving raw tool history.",
   inputSchema: reviewLaneCheckpointInputSchema,
   async execute(input, ctx) {
     const trusted = trustedGitHubContext(ctx.session.auth.current);
@@ -56,12 +57,11 @@ export default defineTool({
         "Trusted review context is missing the patch fingerprint",
       );
     }
-    const identity = {
-      baseSha: trusted.baseSha,
-      headSha: trusted.headSha,
-      patchFingerprint: trusted.patchFingerprint,
-    };
     const sandbox = await ctx.getSandbox();
+    const identity = await currentLaneCheckpointIdentity(
+      ctx.session.auth.current,
+      sandbox,
+    );
     const manifest = await readReviewEvidenceManifest(sandbox, identity);
     if (input.operation === "read") {
       const checkpoint = await readLaneCheckpoint(

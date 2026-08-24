@@ -8,6 +8,13 @@ import {
 } from "../../src/review/evidence-bundle";
 import { reviewAxes } from "../../src/review/axes";
 import { readLaneReviewEvidencePacket } from "../../src/review/lane-evidence";
+import {
+  readReviewEvidenceLedger,
+  validatePreparedArtifactArchives,
+  validateReviewEvidenceLedgerComponents,
+} from "../../src/review/evidence-ledger";
+import { readCapabilityPreflight } from "../../src/review/capability-preflight";
+import { currentReviewEvidenceIdentity } from "../lib/review-evidence";
 
 export const readReviewEvidenceInputSchema = z
   .object({
@@ -70,7 +77,7 @@ export const readReviewEvidenceInputSchema = z
 
 export default defineTool({
   description:
-    "Read the application-prepared immutable review evidence. Review lanes use exactly one application-advanced packet per fresh session; the packet contains bounded included patches and excluded generated, vendored, or binary metadata. Manifest and patch paging remain available to the coordinator. Use this instead of reconstructing the pull-request diff with Git.",
+    "Read the application-prepared immutable evidence ledger. Every lane packet carries the same ledger digest, exact-head Check and artifact provenance, common probes, typed gaps, bounded included patches, and excluded generated, vendored, or binary metadata. Manifest and patch paging remain available to the coordinator. Use this instead of reconstructing shared evidence.",
   inputSchema: readReviewEvidenceInputSchema,
   async execute(input, ctx) {
     const trusted = trustedGitHubContext(ctx.session.auth.current);
@@ -80,14 +87,28 @@ export default defineTool({
       );
     }
     const sandbox = await ctx.getSandbox();
+    const ledgerIdentity = currentReviewEvidenceIdentity(
+      ctx.session.auth.current,
+    );
+    const ledger = await readReviewEvidenceLedger(sandbox, ledgerIdentity);
     const manifest = await readReviewEvidenceManifest(sandbox, {
       baseSha: trusted.baseSha,
       headSha: trusted.headSha,
       patchFingerprint: trusted.patchFingerprint,
     });
+    const capabilities = await readCapabilityPreflight(sandbox, manifest);
+    validateReviewEvidenceLedgerComponents(ledger, {
+      capabilities,
+      manifest,
+    });
+    await validatePreparedArtifactArchives(sandbox, ledger);
     if (input.operation === "manifest") {
       return {
         operation: "manifest" as const,
+        ledgerDigest: ledger.digest,
+        github: ledger.github,
+        probes: ledger.probes,
+        gaps: ledger.gaps,
         ...reviewEvidencePage(manifest, input.cursor ?? 0),
       };
     }
@@ -99,6 +120,7 @@ export default defineTool({
         operation: "packet" as const,
         ...(await readLaneReviewEvidencePacket(
           sandbox,
+          ledgerIdentity,
           manifest,
           input.axis,
           ctx.session.id,
@@ -110,6 +132,7 @@ export default defineTool({
     }
     return {
       operation: "patch" as const,
+      ledgerDigest: ledger.digest,
       ...(await readReviewEvidencePatch(sandbox, manifest, {
         path: input.path,
         cursor: input.cursor ?? 0,

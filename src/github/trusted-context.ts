@@ -10,6 +10,7 @@ export const reviewContextAttributes = {
   plan: "known_good_review_plan",
   reviewFiles: "known_good_review_files",
   repositoryCreatedAt: "known_good_review_repository_created_at",
+  repositoryDatabaseId: "known_good_review_repository_database_id",
   repositoryId: "known_good_review_repository_id",
 } as const;
 
@@ -20,6 +21,7 @@ const trustedGitHubContextSchema = z.object({
   pullRequest: z.coerce.number().int().positive(),
   repository: z.string().regex(/^[^/]+\/[^/]+$/),
   repositoryCreatedAt: z.coerce.number().int().nonnegative(),
+  repositoryDatabaseId: z.coerce.number().int().positive().optional(),
   repositoryId: z.string().min(1),
   baseSha: z.string().min(1),
   headSha: z.string().min(1),
@@ -38,6 +40,7 @@ export function withTrustedReviewContext(
     readonly patchFingerprint?: string;
     readonly plan: string;
     readonly repositoryCreatedAt: number;
+    readonly repositoryDatabaseId: number;
     readonly repositoryId: string;
     readonly reviewFiles: readonly {
       readonly path: string;
@@ -56,6 +59,9 @@ export function withTrustedReviewContext(
       [reviewContextAttributes.plan]: values.plan,
       [reviewContextAttributes.repositoryCreatedAt]: String(
         values.repositoryCreatedAt,
+      ),
+      [reviewContextAttributes.repositoryDatabaseId]: String(
+        values.repositoryDatabaseId,
       ),
       [reviewContextAttributes.repositoryId]: values.repositoryId,
       [reviewContextAttributes.reviewFiles]: JSON.stringify(values.reviewFiles),
@@ -88,6 +94,8 @@ export function trustedGitHubContext(
     repository,
     repositoryCreatedAt:
       auth.attributes[reviewContextAttributes.repositoryCreatedAt],
+    repositoryDatabaseId:
+      auth.attributes[reviewContextAttributes.repositoryDatabaseId],
     repositoryId: auth.attributes[reviewContextAttributes.repositoryId],
     baseSha: auth.attributes[reviewContextAttributes.baseSha],
     headSha: auth.attributes[reviewContextAttributes.headSha],

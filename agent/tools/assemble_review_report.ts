@@ -20,6 +20,7 @@ import {
   currentReviewReportState,
   reviewReportState,
 } from "../lib/review-report";
+import { currentLaneCheckpointIdentity } from "../lib/review-evidence";
 
 export const assembleReviewReportInputSchema = z
   .object({
@@ -53,14 +54,14 @@ export default defineTool({
       );
     }
     const sandbox = await ctx.getSandbox();
+    const checkpointIdentity = await currentLaneCheckpointIdentity(
+      ctx.session.auth.current,
+      sandbox,
+    );
     for (const axis of recovery.activeAxes) {
       const checkpoint = await readLaneCheckpoint(
         sandbox,
-        {
-          baseSha: trusted.baseSha,
-          headSha: trusted.headSha,
-          patchFingerprint: trusted.patchFingerprint,
-        },
+        checkpointIdentity,
         axis,
       );
       if (checkpoint?.status !== "complete") {

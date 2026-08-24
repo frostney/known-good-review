@@ -11,6 +11,7 @@ import {
 } from "../../src/review/recovery";
 import { readLaneCheckpoint } from "../../src/review/lane-checkpoint";
 import { trustedGitHubContext } from "../../src/github/trusted-context";
+import { currentLaneCheckpointIdentity } from "../lib/review-evidence";
 
 const advanceStages = reviewRecoveryStages.filter(
   (stage) => stage !== "started" && stage !== "published",
@@ -57,15 +58,15 @@ export default defineTool({
           throw new Error("Trusted review recovery is missing patch identity");
         }
         const sandbox = await ctx.getSandbox();
+        const checkpointIdentity = await currentLaneCheckpointIdentity(
+          ctx.session.auth.current,
+          sandbox,
+        );
         const completedAxes: typeof recovery.completedAxes = [];
         for (const axis of recovery.activeAxes) {
           const checkpoint = await readLaneCheckpoint(
             sandbox,
-            {
-              baseSha: trusted.baseSha,
-              headSha: trusted.headSha,
-              patchFingerprint: trusted.patchFingerprint,
-            },
+            checkpointIdentity,
             axis,
           );
           if (checkpoint?.status === "complete") completedAxes.push(axis);

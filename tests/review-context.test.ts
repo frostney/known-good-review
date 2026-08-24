@@ -39,6 +39,7 @@ const identity = {
   baseSha: "1".repeat(40),
   headSha: "2".repeat(40),
   patchFingerprint: "3".repeat(64),
+  evidenceDigest: "4".repeat(64),
 };
 
 function memorySandbox() {
@@ -505,6 +506,13 @@ describe("review lane checkpoint", () => {
         "engineering-quality",
       ),
     ).toEqual(first);
+    await expect(
+      readLaneCheckpoint(
+        sandbox.runtime,
+        { ...identity, evidenceDigest: "5".repeat(64) },
+        "engineering-quality",
+      ),
+    ).rejects.toThrow("does not match the trusted review");
 
     const complete = await writeLaneCheckpoint(
       sandbox.runtime,
