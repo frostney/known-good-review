@@ -134,10 +134,13 @@ execution health only: in progress while working, success after complete
 evidence coverage, skipped when a conditional axis does not apply, and
 action-required when an active axis cannot complete. The aggregate Check owns
 the configured blocking policy. Before lanes start, the app records one
-immutable capability preflight for the exact review. Every lane receives the
-same available-command list, repository markers, digest, and GitHub-only
-network boundary. GitHub presentation is derived deterministically from the
-validated v2 report without another model call.
+immutable evidence ledger for the exact review. Its digest binds the patch
+manifest, capability inventory, exact-head Checks, digest-validated workflow
+artifact archives, common probes, and typed gap dispositions. Every lane
+receives that same ledger digest and shared evidence. Artifact contents remain
+untrusted data in the credential-free sandbox and are never executed. GitHub
+presentation is derived deterministically from the validated v2 report without
+another model call.
 The publication tool accepts no report or target from the model. It loads only
 the application-staged report after exact review identity validation.
 
@@ -175,8 +178,8 @@ Provision the Connect-backed GitHub App with Eve's current setup flow, create
 the Convex deployment, deploy the app to Vercel, and install it on selected
 repositories. Give Convex its AI Gateway key and
 the shared memory bearer token; give Eve the Convex HTTP-actions URL and the
-same token. The app needs repository metadata read, contents read, pull
-requests read/write, issues read/write, and checks read/write. Forward
+same token. The app needs repository metadata read, contents read, Actions read,
+pull requests read/write, issues read/write, and checks read/write. Forward
 `pull_request`, `issue_comment`, `installation`, and
 `installation_repositories` events through Connect to `/eve/v1/github`.
 

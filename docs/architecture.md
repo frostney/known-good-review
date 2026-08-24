@@ -50,12 +50,26 @@ report whose repository, PR, base, head, patch, and plan match trusted context.
 
 The coordinator loads the vendored `code-review` skill and maps active axes
 one-to-one to Eve's built-in subagent. After the root revalidates the exact PR
-head, an Eve `action.result` hook prepares the classified patch and one
-immutable capability preflight in the shared sandbox without putting
-preparation commands or raw patches in model history. Every lane receives the
-same preflight with its bounded evidence packet instead of probing unavailable
-commands again. Lanes page an integrity-checked manifest and bounded patch
-chunks instead of independently reconstructing the diff. Child routing
+head, an Eve `action.result` hook performs one application-owned preparation
+phase without putting preparation commands or raw patches in model history.
+Its immutable ledger binds the trusted repository, pull request, base, head,
+patch, plan, and execution revision to component digests for the classified
+patch, capability inventory, exact-head GitHub Checks, workflow artifacts,
+common probes, and typed gaps.
+
+The trusted application boundary lists Checks and workflow runs at the exact
+head. It accepts only unexpired artifact archives whose workflow repository,
+head repository, head SHA, run identity, and SHA-256 digest match GitHub
+metadata. Validated archives enter only the credential-free sandbox as
+untrusted data and are never executed. Missing artifacts have one stable
+repository-owned disposition. Stale, mismatched, or unavailable
+application-owned evidence fails closed before lanes run.
+
+Every lane receives the same ledger digest with its bounded evidence packet
+instead of probing shared evidence again. Lanes page an integrity-checked
+manifest and bounded patch chunks instead of independently reconstructing the
+diff. Their checkpoints bind the ledger digest, while axis-specific source,
+history, test, and probe investigation remains available. Child routing
 envelopes contain an exact skill axis or the `revalidation` or `scout` role.
 Dynamic model routing maps these roles directly to trusted `agents`
 configuration.

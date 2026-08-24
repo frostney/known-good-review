@@ -37,6 +37,7 @@ import {
   reportAssemblyIdentityFromAuth,
   reviewReportState,
 } from "../lib/review-report";
+import { currentLaneCheckpointIdentity } from "../lib/review-evidence";
 import { beginReportAssembly } from "../../src/review/report-assembly";
 import { z } from "zod";
 
@@ -116,15 +117,15 @@ async function recoveryWithObservedAxes(
     throw new Error("Trusted review recovery is missing patch identity");
   }
   const sandbox = await ctx.getSandbox();
+  const checkpointIdentity = await currentLaneCheckpointIdentity(
+    ctx.session.auth.current,
+    sandbox,
+  );
   const completedAxes: typeof recovery.completedAxes = [];
   for (const axis of recovery.activeAxes) {
     const checkpoint = await readLaneCheckpoint(
       sandbox,
-      {
-        baseSha: trusted.baseSha,
-        headSha: trusted.headSha,
-        patchFingerprint: trusted.patchFingerprint,
-      },
+      checkpointIdentity,
       axis,
     );
     if (checkpoint?.status === "complete") completedAxes.push(axis);

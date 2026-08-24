@@ -4,17 +4,33 @@ import { getEncoding } from "js-tiktoken";
 import { z } from "zod";
 import type { TrustedGitHubContext } from "../github/trusted-context";
 import { prepareReviewWorkspace } from "../github/review-workspace";
-import { runCapabilityPreflight } from "./capability-preflight";
+import {
+  readCapabilityPreflight,
+  runCapabilityPreflight,
+} from "./capability-preflight";
+import {
+  assembleReviewEvidenceLedger,
+  prepareCommonProbe,
+  readReviewEvidenceLedger,
+  reviewEvidenceLedgerPath,
+  validatePreparedArtifactArchives,
+  validateReviewEvidenceLedgerComponents,
+  writeReviewEvidenceLedger,
+  type ReviewEvidenceLedger,
+  type ReviewEvidenceLedgerIdentity,
+} from "./evidence-ledger";
 import {
   readReviewEvidenceManifest,
   readReviewEvidencePatch,
   repositoryPathSchema,
   resetReviewEvidence,
+  reviewEvidenceDirectory,
   reviewFileStatusSchema,
   type ReviewEvidenceManifest,
   writeIncludedReviewEvidence,
   writeReviewEvidenceManifest,
 } from "./evidence-bundle";
+import type { PreparedGitHubEvidence } from "./github-evidence";
 
 export const reviewFileScopeSchema = z
   .array(
@@ -65,51 +81,68 @@ function matchesPreparedScope(
   );
 }
 
-async function preparedManifest(
+async function preparedLedger(
   sandbox: RuntimeSandboxSession,
-  trusted: TrustedGitHubContext & { readonly patchFingerprint: string },
+  identity: ReviewEvidenceLedgerIdentity,
   files: ReviewFileScope,
-): Promise<ReviewEvidenceManifest | null> {
-  try {
-    const manifest = await readReviewEvidenceManifest(sandbox, trusted);
-    if (!matchesPreparedScope(manifest, files)) return null;
-    for (const entry of manifest.entries) {
-      if (entry.kind === "included") {
-        await readReviewEvidencePatch(sandbox, manifest, {
-          path: entry.path,
-          cursor: 0,
-        });
-      }
-    }
-    return manifest;
-  } catch {
-    return null;
+): Promise<ReviewEvidenceLedger | null> {
+  const ledgerSource = await sandbox.readTextFile({
+    path: reviewEvidenceLedgerPath(identity.patchFingerprint),
+  });
+  if (ledgerSource === null) return null;
+  const ledger = await readReviewEvidenceLedger(sandbox, identity);
+  const manifest = await readReviewEvidenceManifest(sandbox, identity);
+  if (!matchesPreparedScope(manifest, files)) {
+    throw new Error("Prepared evidence ledger does not match the exact file scope");
   }
+  for (const entry of manifest.entries) {
+    if (entry.kind === "included") {
+      await readReviewEvidencePatch(sandbox, manifest, {
+        path: entry.path,
+        cursor: 0,
+      });
+    }
+  }
+  const capabilities = await readCapabilityPreflight(sandbox, identity);
+  validateReviewEvidenceLedgerComponents(ledger, {
+    capabilities,
+    manifest,
+  });
+  await validatePreparedArtifactArchives(sandbox, ledger);
+  return ledger;
 }
 
 export async function prepareReviewEvidence(
   sandbox: RuntimeSandboxSession,
   trusted: TrustedGitHubContext,
   inputFiles: unknown,
-): Promise<ReviewEvidenceManifest> {
+  input: {
+    readonly collectGitHubEvidence: () => Promise<PreparedGitHubEvidence>;
+    readonly planKind: "full" | "delta";
+  },
+): Promise<ReviewEvidenceLedger> {
   if (!trusted.patchFingerprint) {
     throw new Error("Trusted review context is missing the patch fingerprint");
   }
-  const files = reviewFileScopeSchema.parse(inputFiles);
-  const identity = { ...trusted, patchFingerprint: trusted.patchFingerprint };
-  const existing = await preparedManifest(sandbox, identity, files);
-  if (existing) {
-    const capabilities = await runCapabilityPreflight(sandbox, identity);
-    if (capabilities.created) {
-      console.info(
-        JSON.stringify({
-          event: "known-good-review.capability_preflight.completed",
-          digest: capabilities.preflight.digest,
-        }),
-      );
-    }
-    return existing;
+  if (!trusted.repositoryDatabaseId) {
+    throw new Error(
+      "Trusted review context is missing the repository database id",
+    );
   }
+  const files = reviewFileScopeSchema.parse(inputFiles);
+  const identity: ReviewEvidenceLedgerIdentity = {
+    executionRevision: "review-evidence-v1",
+    repositoryId: trusted.repositoryId,
+    repositoryDatabaseId: trusted.repositoryDatabaseId,
+    repository: trusted.repository,
+    pullRequest: trusted.pullRequest,
+    baseSha: trusted.baseSha,
+    headSha: trusted.headSha,
+    patchFingerprint: trusted.patchFingerprint,
+    planKind: input.planKind,
+  };
+  const existing = await preparedLedger(sandbox, identity, files);
+  if (existing) return existing;
 
   await prepareReviewWorkspace(trusted, sandbox);
   await resetReviewEvidence(sandbox, trusted.patchFingerprint);
@@ -216,5 +249,44 @@ export async function prepareReviewEvidence(
       }),
     );
   }
-  return manifest;
+  const preparedGitHub = await input.collectGitHubEvidence();
+  for (const artifact of preparedGitHub.evidence.artifacts.entries) {
+    const archive = preparedGitHub.archives.get(artifact.id);
+    if (!archive) {
+      throw new Error(
+        "Prepared artifact metadata is missing its validated archive",
+      );
+    }
+    await sandbox.writeBinaryFile({
+      path: `${reviewEvidenceDirectory(identity.patchFingerprint)}/${artifact.archiveFile}`,
+      content: archive,
+    });
+  }
+  const diffCheckCommand = `cd /workspace && git diff --check ${base} ${head}`;
+  const diffCheck = await sandbox.run({ command: diffCheckCommand });
+  const probes = [
+    prepareCommonProbe({
+      id: "git-diff-check",
+      command: "git diff --check <base> <head>",
+      exitCode: diffCheck.exitCode,
+      stdout: String(diffCheck.stdout),
+      stderr: String(diffCheck.stderr),
+    }),
+  ];
+  const ledger = assembleReviewEvidenceLedger({
+    capabilities: capabilities.preflight,
+    github: preparedGitHub.evidence,
+    identity,
+    manifest,
+    probes,
+  });
+  await writeReviewEvidenceLedger(sandbox, ledger);
+  console.info(
+    JSON.stringify({
+      event: "known-good-review.evidence_ledger.completed",
+      digest: ledger.digest,
+      gaps: ledger.gaps.map((gap) => gap.id),
+    }),
+  );
+  return ledger;
 }

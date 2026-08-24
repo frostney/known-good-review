@@ -61,6 +61,7 @@ const contentSchema = z.object({
 
 const permissionSchema = z.object({ permission: z.string() });
 const repositoryDetailsSchema = z.object({
+  id: z.number().int().positive(),
   node_id: z.string().min(1),
   created_at: z.string().datetime(),
 });
@@ -90,6 +91,7 @@ async function fetchRepositoryDetails(ctx: GitHubInboundContext) {
   });
   const repository = repositoryDetailsSchema.parse(response.body);
   return {
+    repositoryDatabaseId: repository.id,
     repositoryId: repository.node_id,
     repositoryCreatedAt: Date.parse(repository.created_at),
   };

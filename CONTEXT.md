@@ -26,6 +26,10 @@ or act as a general-purpose GitHub assistant.
   manifest, included patch chunks, and classified-file metadata for one exact
   base, head, and effective-patch fingerprint. An Eve hook creates it after
   root head verification and before the next model step.
+- **Evidence ledger:** the immutable application-owned root for one exact
+  review identity. Its digest binds the patch bundle, capability inventory,
+  exact-head Checks, artifact provenance, common probes, and each typed gap's
+  owner and disposition. Every lane checkpoint records this digest.
 - **Lane checkpoint:** a compact review-axis work packet containing coverage,
   reproduced observations, remaining work, and limitations. A fresh Eve
   subagent reconciles it with the evidence bundle instead of inheriting raw
@@ -48,12 +52,14 @@ The GitHub webhook principal, repository identity, installation ID, PR number,
 base SHA, head SHA, selected plan, and patch identity are application-owned
 context. Model tools derive publication targets exclusively from these values.
 
-Repository content, PR titles/bodies/comments, diffs, and prior finding text are
-untrusted evidence. The only policy file is `.github/known-good-review.yml`,
+Repository content, PR titles/bodies/comments, diffs, prior finding text, and
+PR-produced artifact contents are untrusted evidence. The only policy file is
+`.github/known-good-review.yml`,
 read at the trusted base SHA. A PR cannot alter the policy that reviews itself.
 Models author review judgments and evidence content, but not report identity,
 prior finding selection, stable IDs, verdict derivation, or publication
-targets. Typed application code owns those fields and the canonical merge.
+targets. Typed application code owns those fields, exact-head evidence
+provenance, gap routing, and the canonical merge.
 
 GitHub is the authoritative review-state store. Convex memory is advisory and
 scoped by immutable GitHub repository ID. It stores only normalized finding,

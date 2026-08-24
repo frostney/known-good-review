@@ -6,11 +6,26 @@ import {
   runCapabilityPreflight,
 } from "../src/review/capability-preflight";
 import { readLaneReviewEvidencePacket } from "../src/review/lane-evidence";
+import {
+  assembleReviewEvidenceLedger,
+  writeReviewEvidenceLedger,
+} from "../src/review/evidence-ledger";
+import { prepareExactHeadGitHubEvidence } from "../src/review/github-evidence";
 
 const identity = {
   baseSha: "1".repeat(40),
   headSha: "2".repeat(40),
   patchFingerprint: "3".repeat(64),
+};
+
+const ledgerIdentity = {
+  executionRevision: "review-evidence-v1" as const,
+  repositoryId: "R_test",
+  repositoryDatabaseId: 41,
+  repository: "frostney/pascal-mcp-sdk",
+  pullRequest: 61,
+  ...identity,
+  planKind: "delta" as const,
 };
 
 function sandbox() {
@@ -23,6 +38,9 @@ function sandbox() {
       async removePath() {},
       async readTextFile({ path }: { readonly path: string }) {
         return files.get(path) ?? null;
+      },
+      async readBinaryFile() {
+        return null;
       },
       async run({ command }: { readonly command: string }) {
         commands.push(command);
@@ -48,6 +66,33 @@ function sandbox() {
       },
     },
   };
+}
+
+async function prepareLaneEvidence(observed: ReturnType<typeof sandbox>) {
+  const capabilities = await runCapabilityPreflight(
+    observed.runtime,
+    identity,
+  );
+  const manifest = { schemaVersion: 1 as const, ...identity, entries: [] };
+  const github = prepareExactHeadGitHubEvidence({
+    artifactsByRun: new Map(),
+    checkRuns: [],
+    headSha: identity.headSha,
+    observedAt: "2026-08-24T12:00:00.000Z",
+    repositoryDatabaseId: ledgerIdentity.repositoryDatabaseId,
+    workflowRuns: [],
+  });
+  await writeReviewEvidenceLedger(
+    observed.runtime,
+    assembleReviewEvidenceLedger({
+      capabilities: capabilities.preflight,
+      github: github.evidence,
+      identity: ledgerIdentity,
+      manifest,
+      probes: [],
+    }),
+  );
+  return manifest;
 }
 
 describe("review capability preflight", () => {
@@ -99,17 +144,18 @@ describe("review capability preflight", () => {
 
   test("provides the same preflight to every lane packet", async () => {
     const observed = sandbox();
-    await runCapabilityPreflight(observed.runtime, identity);
-    const manifest = { schemaVersion: 1 as const, ...identity, entries: [] };
+    const manifest = await prepareLaneEvidence(observed);
 
     const engineering = await readLaneReviewEvidencePacket(
       observed.runtime,
+      ledgerIdentity,
       manifest,
       "engineering-quality",
       "engineering-session",
     );
     const specification = await readLaneReviewEvidencePacket(
       observed.runtime,
+      ledgerIdentity,
       manifest,
       "claim-and-specification",
       "specification-session",
@@ -121,12 +167,13 @@ describe("review capability preflight", () => {
     expect(engineering.capabilityPreflight.digest).toBe(
       specification.capabilityPreflight.digest,
     );
+    expect(engineering.ledgerDigest).toBe(specification.ledgerDigest);
     expect(observed.commands).toHaveLength(1);
   });
 
   test("does not advance lane evidence when preflight validation fails", async () => {
     const observed = sandbox();
-    await runCapabilityPreflight(observed.runtime, identity);
+    const manifest = await prepareLaneEvidence(observed);
     const path = capabilityPreflightPath(identity.patchFingerprint);
     const parsed = JSON.parse(observed.files.get(path) ?? "{}") as {
       headSha: string;
@@ -137,7 +184,8 @@ describe("review capability preflight", () => {
     await expect(
       readLaneReviewEvidencePacket(
         observed.runtime,
-        { schemaVersion: 1, ...identity, entries: [] },
+        ledgerIdentity,
+        manifest,
         "engineering-quality",
         "failed-session",
       ),

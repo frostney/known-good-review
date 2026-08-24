@@ -63,11 +63,12 @@ export const laneCheckpointContentSchema = z
   });
 
 export const laneCheckpointSchema = laneCheckpointContentSchema.extend({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
   axis: z.enum(reviewAxes),
   baseSha: revisionSchema,
   headSha: revisionSchema,
   patchFingerprint: fingerprintSchema,
+  evidenceDigest: fingerprintSchema,
   revision: z.number().int().positive(),
 });
 
@@ -78,6 +79,7 @@ export interface LaneCheckpointIdentity {
   readonly baseSha: string;
   readonly headSha: string;
   readonly patchFingerprint: string;
+  readonly evidenceDigest: string;
 }
 
 export interface LaneCheckpointSandbox {
@@ -89,7 +91,7 @@ export interface LaneCheckpointSandbox {
 }
 
 const maxCheckpointBytes = 65_536;
-export const reviewExecutionRevision = "review-context-v1";
+export const reviewExecutionRevision = "review-context-v2";
 
 export function validateLaneCheckpointCoverage(
   content: LaneCheckpointContent,
@@ -171,7 +173,8 @@ export async function readLaneCheckpoint(
     checkpoint.axis !== axis ||
     checkpoint.baseSha !== identity.baseSha ||
     checkpoint.headSha !== identity.headSha ||
-    checkpoint.patchFingerprint !== identity.patchFingerprint
+    checkpoint.patchFingerprint !== identity.patchFingerprint ||
+    checkpoint.evidenceDigest !== identity.evidenceDigest
   ) {
     throw new Error("Lane checkpoint does not match the trusted review");
   }
@@ -200,7 +203,7 @@ export async function writeLaneCheckpoint(
     throw new Error("A completed review lane cannot be replaced");
   }
   const checkpoint = laneCheckpointSchema.parse({
-    schemaVersion: 1,
+    schemaVersion: 2,
     axis,
     ...identity,
     revision: (prior?.revision ?? 0) + 1,
