@@ -144,15 +144,19 @@ restarting uncheckpointed work. After Workflow reports every axis complete,
 call `review_recovery` with `operation: advance` and `stage: axes-complete`.
 The application validates every exact checkpoint before advancing. The
 coordinator then reads every exact checkpoint in one parallel tool-call batch
-using `operation: read` and `checkpoint: null`, reconciles their
-`completedReport` values into one canonical v2 report. The coordinator passes
-only that unchanged report to the single `publish_review` call. The application
-derives presentation deterministically from canonical text and the finding's
-location path and symbol. No presentation model or formatting retry participates
-in publication. The coordinator performs no additional repository inspection
-or probes after Workflow returns. At
-coordinator step sixteen the application withdraws every capability except
-checkpoint reads and publication.
+using `operation: read` and `checkpoint: null`, and reconciles their
+`completedReport` values into the draft content accepted by
+`assemble_review_report`. The draft excludes report identity, prior findings,
+finding IDs, verdict, and publication targets. Typed application code injects
+the trusted identity, merges the prior baseline and recorded revalidation,
+allocates stable new IDs, derives the verdict, validates the canonical v2
+report, and stages it durably before publication. The application derives
+presentation deterministically from canonical text and the finding's location
+path and symbol. No presentation model or formatting retry participates in
+publication. The coordinator performs no additional repository inspection or
+probes after Workflow returns. At coordinator step sixteen the application
+withdraws every capability except checkpoint reads, revalidation recording,
+report assembly, and publication.
 Workflow exhaustion, a lane without a valid checkpoint, or a complete receipt
 without a complete checkpoint is incomplete evidence and must fail closed;
 never publish a partial verdict.
@@ -183,9 +187,10 @@ mapping does not create another finding model system; revalidation then uses
 the coordinator chain.
 
 After every selected prior finding has been revalidated, call
-`review_recovery` with `operation: advance` and `stage:
-revalidation-complete`. A review with no selected prior findings skips this
-stage.
+`record_review_revalidation` once with the complete typed finding outcomes.
+The application requires every selected ID exactly once, persists the results,
+and advances recovery to `revalidation-complete`. A review with no selected
+prior findings skips this stage.
 
 For every finding, set `location.path` to the changed file and
 `location.line` to the exact head-side line in the pull-request diff that best
@@ -193,19 +198,18 @@ demonstrates the problem. Prefer a changed line; a visible context line is
 acceptable when it is the precise location. Do not locate a finding on a
 supporting file or an unchanged line outside the diff.
 
-Write the final canonical result as the exact code-review findings JSON schema
-version 2. For a delta, merge the fresh exact-file findings, every selected
-prior finding with its current status, and every unchanged carry-forward
-finding. Preserve stable prior IDs; allocate new IDs above the highest prior
-number. A resolved prior finding remains in this result with `status: fixed`, a
-still-present or changed one remains `open` or `deferred`, and a not-retestable
-one remains `deferred` with the limitation recorded. After the canonical report
-is fully reconciled, call `review_recovery` with `operation: advance` and
-`stage: report-reconciled`. Then call `publish_review` exactly once. It
-validates the artifact and derives repository, pull request,
-head, and Check
-Run identity from trusted channel context. Do not post a prose review or use
-GitHub APIs from the repository sandbox.
+Write only the final report draft content accepted by
+`assemble_review_report`. For a delta, include only genuinely fresh exact-file
+findings in `freshFindings`; application code merges every recorded selected
+finding and unchanged carry-forward finding, preserves stable prior IDs, and
+allocates new IDs above the prior maximum. A resolved prior finding remains
+`fixed`, a still-present or changed one remains `open` or `deferred`, and a
+not-retestable one remains `deferred` with its limitation recorded. Call
+`assemble_review_report` once, then call `publish_review` once with an empty
+input object. Publication loads the staged report and every target from trusted
+application state. A publication retry is handled directly by the application
+without a coordinator turn. Do not post a prose review or use GitHub APIs from
+the repository sandbox.
 
 The trusted review profile changes publication only, never review depth or the
 canonical report. `focused` publishes Blocking and Important findings,

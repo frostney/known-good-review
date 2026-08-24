@@ -32,6 +32,12 @@ import {
   recoveryStateFromAuth,
   reviewRecoveryState,
 } from "../lib/review-recovery";
+import {
+  currentReviewReportState,
+  reportAssemblyIdentityFromAuth,
+  reviewReportState,
+} from "../lib/review-report";
+import { beginReportAssembly } from "../../src/review/report-assembly";
 import { z } from "zod";
 
 const stepRoutes = new Map<
@@ -141,7 +147,11 @@ async function failureEnvelope(
   errorClass: string,
   retryEligible?: boolean,
 ): Promise<ReviewFailureEnvelope> {
+  const diagnostics = currentReviewReportState(
+    ctx.session.auth.current,
+  ).diagnostics;
   return buildReviewFailureEnvelope({
+    ...(diagnostics.length === 0 ? {} : { diagnostics }),
     errorClass: symbolicErrorClass(errorClass),
     recovery: await recoveryWithObservedAxes(ctx),
     ...(retryEligible === undefined ? {} : { retryEligible }),
@@ -173,12 +183,19 @@ function failureSummary(failure: ReviewFailureEnvelope): string {
     failure.completedAxes.length > 0
       ? failure.completedAxes.join(", ")
       : "none";
+  const diagnostics = failure.diagnostics?.map(
+    (diagnostic) =>
+      `${diagnostic.code} at ${diagnostic.path.length === 0 ? "<root>" : diagnostic.path.join(".")}`,
+  );
   return [
     `Review execution stopped at ${failure.failedStage}.`,
     `Completed axes: ${completed}.`,
     `Recovery revision: ${failure.executionRevision}.`,
     `Retry eligible: ${failure.retryEligible ? "yes" : "no"}.`,
     `Error class: ${failure.errorClass}.`,
+    ...(diagnostics && diagnostics.length > 0
+      ? [`Schema diagnostics: ${diagnostics.join(", ")}.`]
+      : []),
   ].join(" ");
 }
 
@@ -276,6 +293,11 @@ export default defineHook({
       }
       reviewRecoveryState.update(() =>
         recoveryStateFromAuth(ctx.session.auth.current),
+      );
+      reviewReportState.update(() =>
+        beginReportAssembly(
+          reportAssemblyIdentityFromAuth(ctx.session.auth.current),
+        ),
       );
     },
     "message.received"(event, ctx) {

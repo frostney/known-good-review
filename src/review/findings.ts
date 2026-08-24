@@ -16,25 +16,26 @@ const churnSchema = z.object({
   coSignals: z.array(z.string()),
 });
 
-export const reviewFindingSchema = z
-  .object({
-    id: z.string().regex(/^CR-[1-9]\d*$/),
-    severity: z.enum(["BLOCKING", "IMPORTANT", "IMPROVEMENT", "NITPICK"]),
-    category: z.enum([
-      "CLAIM",
-      "QUALITY",
-      "ARCHITECTURE_RISK",
-      "DISCOVERABILITY",
-    ]),
-    title: z.string().min(1),
-    location: findingLocationSchema,
-    evidence: z.array(z.string().min(1)).min(1),
-    impact: z.string().min(1),
-    remedy: z.string().min(1),
-    status: z.enum(["open", "fixed", "deferred"]),
-    staticOnly: z.boolean(),
-    churn: churnSchema.nullable(),
-  })
+export const reviewFindingObjectSchema = z.object({
+  id: z.string().regex(/^CR-[1-9]\d*$/),
+  severity: z.enum(["BLOCKING", "IMPORTANT", "IMPROVEMENT", "NITPICK"]),
+  category: z.enum([
+    "CLAIM",
+    "QUALITY",
+    "ARCHITECTURE_RISK",
+    "DISCOVERABILITY",
+  ]),
+  title: z.string().min(1),
+  location: findingLocationSchema,
+  evidence: z.array(z.string().min(1)).min(1),
+  impact: z.string().min(1),
+  remedy: z.string().min(1),
+  status: z.enum(["open", "fixed", "deferred"]),
+  staticOnly: z.boolean(),
+  churn: churnSchema.nullable(),
+});
+
+export const reviewFindingSchema = reviewFindingObjectSchema
   .superRefine((finding, ctx) => {
     if (finding.category === "ARCHITECTURE_RISK" && finding.churn === null) {
       ctx.addIssue({

@@ -5,6 +5,8 @@ import { readReviewEvidenceInputSchema } from "../agent/tools/read_review_eviden
 import { reviewLaneCheckpointInputSchema } from "../agent/tools/review_lane_checkpoint";
 import { reviewRecoveryInputSchema } from "../agent/tools/review_recovery";
 import { publishReviewInputSchema } from "../agent/tools/publish_review";
+import { assembleReviewReportInputSchema } from "../agent/tools/assemble_review_report";
+import { recordReviewRevalidationInputSchema } from "../agent/tools/record_review_revalidation";
 import {
   readReviewEvidenceManifest,
   readNextReviewEvidencePacket,
@@ -90,9 +92,17 @@ describe("review evidence bundle", () => {
       "axis",
       "cursor",
     ]);
-    expect(z.toJSONSchema(publishReviewInputSchema).required).toEqual([
-      "report",
+    expect(z.toJSONSchema(publishReviewInputSchema).required).toBeUndefined();
+    expect(publishReviewInputSchema.safeParse({}).success).toBeTrue();
+    expect(
+      publishReviewInputSchema.safeParse({ report: {} }).success,
+    ).toBeFalse();
+    expect(z.toJSONSchema(assembleReviewReportInputSchema).required).toEqual([
+      "draft",
     ]);
+    expect(
+      z.toJSONSchema(recordReviewRevalidationInputSchema).required,
+    ).toEqual(["findings"]);
     expect(z.toJSONSchema(laneCheckpointContentSchema).required).toContain(
       "completedReport",
     );

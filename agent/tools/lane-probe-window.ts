@@ -12,7 +12,7 @@ const blockedInputSchema = z.record(z.string(), z.unknown());
 const blockedDescription =
   "The deep-review probe window is complete. Do not inspect more material in this fresh context. Write the exact lane checkpoint now, then return the required structured complete or incomplete result. A fresh continuation receives the next evidence packet when work remains.";
 const coordinatorBlockedDescription =
-  "The coordinator review window is complete. Do not inspect more repository material or delegate more work. Read the exact lane checkpoints, then call publish_review once. If required evidence is incomplete, finish without publishing so the application fails closed.";
+  "The coordinator review window is complete. Do not inspect more repository material or delegate more work. Read the exact lane checkpoints, persist selected-finding revalidation when applicable, assemble the report draft, then publish the staged report. If required evidence is incomplete, finish without publishing so the application fails closed.";
 
 function reviewKind(raw: string | readonly string[] | undefined) {
   if (typeof raw !== "string") return undefined;
@@ -42,7 +42,7 @@ export default defineDynamic({
           execute: (_input) => ({
             blocked: true,
             requiredAction:
-              "Read complete lane checkpoints, then call publish_review exactly once.",
+              "Read complete lane checkpoints, record revalidation when applicable, call assemble_review_report, then call publish_review with an empty object.",
           }),
         });
         return {

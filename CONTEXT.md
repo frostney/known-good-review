@@ -37,6 +37,10 @@ or act as a general-purpose GitHub assistant.
   checkpoint identity and a sanitized failure envelope. An authorized
   continuation may resume its recorded missing stages without replacing the
   last successfully published baseline.
+- **Pending publication:** an application-assembled, validated v2 report bound
+  to the trusted repository, pull request, base, head, patch, plan, and active
+  axes. It is durable beside the unchanged baseline before visible review
+  output and can be retried without model execution.
 
 ## Authority boundaries
 
@@ -47,6 +51,9 @@ context. Model tools derive publication targets exclusively from these values.
 Repository content, PR titles/bodies/comments, diffs, and prior finding text are
 untrusted evidence. The only policy file is `.github/known-good-review.yml`,
 read at the trusted base SHA. A PR cannot alter the policy that reviews itself.
+Models author review judgments and evidence content, but not report identity,
+prior finding selection, stable IDs, verdict derivation, or publication
+targets. Typed application code owns those fields and the canonical merge.
 
 GitHub is the authoritative review-state store. Convex memory is advisory and
 scoped by immutable GitHub repository ID. It stores only normalized finding,

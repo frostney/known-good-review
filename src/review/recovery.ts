@@ -1,5 +1,9 @@
 import { z } from "zod";
 import { reviewAxes } from "./axes";
+import {
+  schemaDiagnosticSchema,
+  type SchemaDiagnostic,
+} from "./report-assembly";
 
 const revisionSchema = z.string().regex(/^[a-f0-9]{40}$/);
 const fingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -113,6 +117,7 @@ export const reviewFailureEnvelopeSchema = z
     ]),
     completedAxes: z.array(z.enum(reviewAxes)).max(reviewAxes.length),
     errorClass: errorClassSchema,
+    diagnostics: z.array(schemaDiagnosticSchema).max(20).optional(),
     retryEligible: z.boolean(),
     run: z.object({
       sessionId: safeCorrelationSchema,
@@ -286,6 +291,7 @@ export function recoveryWork(state: ReviewRecoveryState): RecoveryWork[] {
 }
 
 export function buildReviewFailureEnvelope(input: {
+  readonly diagnostics?: readonly SchemaDiagnostic[];
   readonly errorClass: string;
   readonly recovery: ReviewRecoveryState;
   readonly retryEligible?: boolean;
@@ -308,6 +314,9 @@ export function buildReviewFailureEnvelope(input: {
     failedStage,
     completedAxes: recovery.completedAxes,
     errorClass: input.errorClass,
+    ...(input.diagnostics === undefined
+      ? {}
+      : { diagnostics: input.diagnostics }),
     retryEligible:
       input.retryEligible ??
       (recovery.completedAxes.length > 0 || recovery.stage !== "started"),

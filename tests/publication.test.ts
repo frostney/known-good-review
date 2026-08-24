@@ -6,8 +6,10 @@ import {
   parseActiveReviewExternalId,
   publishInProgressCheck,
   publishReview,
+  stageReviewPublication,
   writeReviewFailureState,
 } from "../src/github/publication";
+import { decodeReviewState, encodeReviewState } from "../src/github/review-state";
 import type { TrustedGitHubContext } from "../src/github/trusted-context";
 import type { ReviewReport } from "../src/review/findings";
 import {
@@ -101,6 +103,98 @@ function report(): ReviewReport {
 }
 
 describe("GitHub publication lifecycle", () => {
+  test("stages a validated current-head report without advancing the baseline", async () => {
+    const requests: CapturedRequest[] = [];
+    const publicationContext = {
+      ...context(),
+      baseSha: "1".repeat(40),
+      headSha: "2".repeat(40),
+    };
+    const baselineHead = "3".repeat(40);
+    const baselineReport = {
+      ...report(),
+      scope: { ...report().scope, head: baselineHead },
+    };
+    const existingState = encodeReviewState({
+      schemaVersion: 2,
+      app: "known-good-review",
+      pullRequest: publicationContext.pullRequest,
+      initialFullStatus: "completed",
+      baseline: {
+        head: baselineHead,
+        patchFingerprint: "b".repeat(64),
+        findingsArtifactUrl: "https://github.com/acme/widget/runs/40",
+        files: {},
+        report: baselineReport,
+      },
+      updatedAt: "2026-08-23T01:00:00.000Z",
+    });
+    const pendingReport = {
+      ...report(),
+      scope: {
+        ...report().scope,
+        base: publicationContext.baseSha,
+        head: publicationContext.headSha,
+      },
+      coverage: {
+        ...report().coverage,
+        activeAxes: ["engineering-quality" as const],
+      },
+    };
+    const octokit = new Octokit({
+      auth: "test-token",
+      request: {
+        fetch: async (resource: Request | string | URL, init?: RequestInit) => {
+          const url = new URL(String(resource));
+          const method = init?.method ?? "GET";
+          const body =
+            typeof init?.body === "string" ? JSON.parse(init.body) : null;
+          requests.push({
+            body,
+            headers: new Headers(init?.headers),
+            method,
+            path: url.pathname,
+          });
+          if (method === "GET" && url.pathname.endsWith("/issues/7/comments")) {
+            return json([{ id: 401, body: existingState }]);
+          }
+          if (method === "PATCH" && url.pathname.endsWith("/issues/comments/401")) {
+            return json({ id: 401, body });
+          }
+          throw new Error(`Unexpected GitHub request: ${method} ${url.pathname}`);
+        },
+      },
+    });
+
+    await stageReviewPublication({
+      context: publicationContext,
+      identity: {
+        executionRevision: "review-report-v1",
+        repositoryId: publicationContext.repositoryId,
+        pullRequest: publicationContext.pullRequest,
+        baseSha: publicationContext.baseSha,
+        headSha: publicationContext.headSha,
+        patchFingerprint: publicationContext.patchFingerprint ?? "",
+        planKind: "delta",
+        activeAxes: ["engineering-quality"],
+        selectedFindingIds: ["CR-1"],
+      },
+      octokit,
+      report: pendingReport,
+    });
+
+    const update = requests.find(
+      (request) =>
+        request.method === "PATCH" &&
+        request.path.endsWith("/issues/comments/401"),
+    )?.body as { readonly body?: string } | undefined;
+    const staged = decodeReviewState(update?.body ?? "");
+    expect(staged?.baseline?.head).toBe(baselineHead);
+    expect(staged?.pendingPublication?.report.scope.head).toBe(
+      publicationContext.headSha,
+    );
+  });
+
   test("persists a current-head recovery failure without inventing review output", async () => {
     const requests: CapturedRequest[] = [];
     const failureContext = {
@@ -109,21 +203,73 @@ describe("GitHub publication lifecycle", () => {
       headSha: "2".repeat(40),
     };
     const recovery = advanceReviewRecovery(
-      beginReviewRecovery({
+      advanceReviewRecovery(
+        advanceReviewRecovery(
+          beginReviewRecovery({
+            activeAxes: ["engineering-quality"],
+            identity: {
+              baseSha: failureContext.baseSha,
+              headSha: failureContext.headSha,
+              patchFingerprint: failureContext.patchFingerprint ?? "",
+              planKind: "delta",
+            },
+            selectedFindingIds: ["CR-7"],
+          }),
+          {
+            completedAxes: ["engineering-quality"],
+            stage: "axes-complete",
+          },
+        ),
+        {
+          stage: "revalidation-complete",
+        },
+      ),
+      {
+        stage: "report-reconciled",
+      },
+    );
+    const baselineHead = "3".repeat(40);
+    const pendingReport: ReviewReport = {
+      ...report(),
+      scope: {
+        ...report().scope,
+        base: failureContext.baseSha,
+        head: failureContext.headSha,
+      },
+      coverage: {
+        ...report().coverage,
         activeAxes: ["engineering-quality"],
+      },
+    };
+    const existingState = encodeReviewState({
+      schemaVersion: 2,
+      app: "known-good-review",
+      pullRequest: failureContext.pullRequest,
+      initialFullStatus: "completed",
+      baseline: {
+        head: baselineHead,
+        patchFingerprint: "b".repeat(64),
+        findingsArtifactUrl: "https://github.com/acme/widget/runs/40",
+        files: {},
+        report: { ...report(), scope: { ...report().scope, head: baselineHead } },
+      },
+      pendingPublication: {
         identity: {
+          executionRevision: "review-report-v1",
+          repositoryId: failureContext.repositoryId,
+          pullRequest: failureContext.pullRequest,
           baseSha: failureContext.baseSha,
           headSha: failureContext.headSha,
           patchFingerprint: failureContext.patchFingerprint ?? "",
           planKind: "delta",
+          activeAxes: ["engineering-quality"],
+          selectedFindingIds: ["CR-7"],
         },
-        selectedFindingIds: ["CR-7"],
-      }),
-      {
-        completedAxes: ["engineering-quality"],
-        stage: "axes-complete",
+        report: pendingReport,
+        stagedAt: "2026-08-23T01:02:00.000Z",
       },
-    );
+      updatedAt: "2026-08-23T01:02:00.000Z",
+    });
     const octokit = new Octokit({
       auth: "test-token",
       request: {
@@ -145,9 +291,9 @@ describe("GitHub publication lifecycle", () => {
             });
           }
           if (method === "GET" && url.pathname.endsWith("/issues/7/comments")) {
-            return json([]);
+            return json([{ id: 401, body: existingState }]);
           }
-          if (method === "POST" && url.pathname.endsWith("/issues/7/comments")) {
+          if (method === "PATCH" && url.pathname.endsWith("/issues/comments/401")) {
             return json({ id: 401, body });
           }
           throw new Error(`Unexpected GitHub request: ${method} ${url.pathname}`);
@@ -165,15 +311,18 @@ describe("GitHub publication lifecycle", () => {
       octokit,
     });
 
-    expect(
-      requests.find(
-        (request) =>
-          request.method === "POST" &&
-          request.path.endsWith("/issues/7/comments"),
-      )?.body,
-    ).toMatchObject({
-      body: expect.stringContaining("known-good-review:state"),
-    });
+    const update = requests.find(
+      (request) =>
+        request.method === "PATCH" &&
+        request.path.endsWith("/issues/comments/401"),
+    )?.body as { readonly body?: string } | undefined;
+    expect(update?.body).toContain("known-good-review:state");
+    const updated = decodeReviewState(update?.body ?? "");
+    expect(updated?.baseline?.head).toBe(baselineHead);
+    expect(updated?.pendingPublication?.report.scope.head).toBe(
+      failureContext.headSha,
+    );
+    expect(updated?.failure?.failedStage).toBe("publication");
   });
 
   test("round-trips current-head review identity through the Check Run", () => {

@@ -43,8 +43,8 @@ model.
 
 For model-backed paths, the channel writes the trusted base/head/config/plan
 into Eve auth attributes and adds a review envelope to context. Publication
-tools accept only a validated report; they never accept owner, repository, PR,
-head, installation, or Check name as model input.
+tools accept no report or target from the model. They load a validated staged
+report whose repository, PR, base, head, patch, and plan match trusted context.
 
 ## Review execution
 
@@ -82,9 +82,13 @@ state service.
 
 When a lane needs bounded related-source, history, rendered-page, or web
 evidence, the coordinator starts a fresh routed scout and passes its compact
-evidence to the next fresh lane. After all axis reports reconcile, the app
-derives exact-copy text and code segments deterministically from canonical
-finding text, location paths, and symbols, then publishes once.
+evidence to the next fresh lane. Selected-finding outcomes are persisted before
+report assembly. After all axis reports reconcile, typed application code
+merges prior and fresh findings, preserves stable prior IDs, assigns new IDs,
+injects trusted review identity, derives the verdict, validates the v2 report,
+and stages it beside the unchanged baseline. The app then derives exact-copy
+text and code segments deterministically from canonical finding text, location
+paths, and symbols.
 
 Eve compacts a lane at 25 percent of the selected model's context window. The
 percentage adapts to arbitrary Gateway models while leaving enough room for a
@@ -130,6 +134,13 @@ because a completed run is terminal. Manual comment triggers receive an
 eyes reaction from the webhook handler while it still owns the exact triggering
 comment. Completion moves the active Check Run to its final verdict.
 
+The validated report is written into `pendingPublication` before any visible
+review is submitted. That state is bound to the exact trusted review identity
+and coexists with the last successful baseline. A publication failure therefore
+leaves the prior baseline intact and gives `@known-good-review continue` one
+application-only operation: reload the staged report and retry GitHub. It does
+not start an Eve coordinator turn, lane, or revalidation worker.
+
 Every successful publication also updates one visible PR summary containing the
 result and a hidden canonical state schema v2 artifact, baseline head,
 whole-patch fingerprint, and per-file fingerprints. Findings use native inline
@@ -152,8 +163,9 @@ a second full review.
 A current-head failure also records a bounded, sanitized envelope beside the
 unchanged successful baseline. It binds the failed stage and completed axes to
 the trusted base, head, effective patch, plan, session, turn, and recovery
-revision. Authorized continuation reuses only matching durable session state
-and lane checkpoints; token-limit failures remain ineligible.
+revision. Schema failures retain bounded issue codes and field paths without
+input values. Authorized continuation reuses only matching durable state and
+lane checkpoints; token-limit failures remain ineligible.
 
 ## Sandbox and telemetry
 
