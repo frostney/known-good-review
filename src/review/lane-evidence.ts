@@ -38,6 +38,7 @@ export async function readLaneReviewEvidencePacket(
   );
   return {
     ledgerDigest: ledger.digest,
+    commonWork: ledger.commonWork,
     github: ledger.github,
     probes: ledger.probes,
     gaps: ledger.gaps,

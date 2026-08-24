@@ -13,5 +13,5 @@
     "noUncheckedIndexedAccess": true,
     "useUnknownInCatchVariables": true
   },
-  "include": ["agent/**/*.ts", "src/**/*.ts", "tests/**/*.ts"]
+  "include": ["agent/**/*.ts", "scripts/**/*.ts", "src/**/*.ts", "tests/**/*.ts"]
 }

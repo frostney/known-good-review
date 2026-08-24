@@ -19,6 +19,8 @@ import {
 } from "../src/review/evidence-ledger";
 import { writeReviewEvidenceManifest } from "../src/review/evidence-bundle";
 import { prepareReviewEvidence } from "../src/review/prepare-review-evidence";
+import { parseReviewConfig } from "../src/config/review-config";
+import { commonWorkFixture } from "./common-work-fixture";
 
 const headSha = "2".repeat(40);
 const repositoryDatabaseId = 41;
@@ -123,7 +125,7 @@ describe("exact-head evidence replay", () => {
   test("binds the root digest and artifact bytes to the complete review identity", async () => {
     const prepared = replay();
     const identity = {
-      executionRevision: "review-evidence-v1" as const,
+      executionRevision: "review-evidence-v2" as const,
       repositoryId: "R_test",
       repositoryDatabaseId,
       repository: "frostney/pascal-mcp-sdk",
@@ -144,6 +146,7 @@ describe("exact-head evidence replay", () => {
         repositoryMarkers: [],
         digest: "7".repeat(64),
       }),
+      commonWork: commonWorkFixture(identity),
       github: prepared.evidence,
       identity,
       manifest: {
@@ -202,7 +205,7 @@ describe("exact-head evidence replay", () => {
 
   test("reuses one complete ledger without rerunning application preparation", async () => {
     const identity = {
-      executionRevision: "review-evidence-v1" as const,
+      executionRevision: "review-evidence-v2" as const,
       repositoryId: "R_test",
       repositoryDatabaseId,
       repository: "frostney/pascal-mcp-sdk",
@@ -261,6 +264,7 @@ describe("exact-head evidence replay", () => {
     });
     const ledger = assembleReviewEvidenceLedger({
       capabilities: capabilities.preflight,
+      commonWork: commonWorkFixture(identity),
       github: github.evidence,
       identity,
       manifest,
@@ -283,7 +287,15 @@ describe("exact-head evidence replay", () => {
       patchFingerprint: identity.patchFingerprint,
     };
     const preparation = {
+      config: parseReviewConfig(null),
       planKind: identity.planKind,
+      async collectMemory() {
+        collectionCalls += 1;
+        return {
+          kind: "unavailable" as const,
+          reason: "Repository memory is not configured.",
+        };
+      },
       async collectGitHubEvidence() {
         collectionCalls += 1;
         return github;

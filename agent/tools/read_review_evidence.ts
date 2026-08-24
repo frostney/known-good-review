@@ -77,7 +77,7 @@ export const readReviewEvidenceInputSchema = z
 
 export default defineTool({
   description:
-    "Read the application-prepared immutable evidence ledger. Every lane packet carries the same ledger digest, exact-head Check and artifact provenance, common probes, typed gaps, bounded included patches, and excluded generated, vendored, or binary metadata. Manifest and patch paging remain available to the coordinator. Use this instead of reconstructing shared evidence.",
+    "Read the application-prepared immutable evidence ledger. Every lane packet carries the same stable common-work identities, prepared repository memory and history, exact-head Check and artifact provenance, common probes, typed gaps, bounded included patches, and excluded generated, vendored, or binary metadata. Manifest and patch paging remain available to the coordinator. Use this instead of reconstructing shared evidence.",
   inputSchema: readReviewEvidenceInputSchema,
   async execute(input, ctx) {
     const trusted = trustedGitHubContext(ctx.session.auth.current);
@@ -106,6 +106,7 @@ export default defineTool({
       return {
         operation: "manifest" as const,
         ledgerDigest: ledger.digest,
+        commonWork: ledger.commonWork,
         github: ledger.github,
         probes: ledger.probes,
         gaps: ledger.gaps,

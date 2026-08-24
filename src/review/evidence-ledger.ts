@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { CapabilityPreflight } from "./capability-preflight";
+import {
+  commonReviewWorkSchema,
+  digestCommonWorkValue,
+  type CommonReviewWork,
+} from "./common-work";
 import type { ReviewEvidenceManifest } from "./evidence-bundle";
 import {
   evidenceGapSchema,
@@ -24,7 +29,7 @@ export const commonEvidenceProbeSchema = z.object({
 export type CommonEvidenceProbe = z.infer<typeof commonEvidenceProbeSchema>;
 
 export const reviewEvidenceLedgerIdentitySchema = z.object({
-  executionRevision: z.literal("review-evidence-v1"),
+  executionRevision: z.literal("review-evidence-v2"),
   repositoryId: z.string().min(1),
   repositoryDatabaseId: z.number().int().positive(),
   repository: z.string().regex(/^[^/]+\/[^/]+$/),
@@ -40,17 +45,19 @@ export type ReviewEvidenceLedgerIdentity = z.infer<
 >;
 
 const reviewEvidenceLedgerPayloadSchema = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
   identity: reviewEvidenceLedgerIdentitySchema,
   components: z.object({
     patchManifestDigest: fingerprintSchema,
     capabilityDigest: fingerprintSchema,
     githubDigest: fingerprintSchema,
     probesDigest: fingerprintSchema,
+    commonWorkDigest: fingerprintSchema,
   }),
   github: exactHeadGitHubEvidenceSchema,
   probes: z.array(commonEvidenceProbeSchema),
   gaps: z.array(evidenceGapSchema),
+  commonWork: commonReviewWorkSchema,
 });
 
 export const reviewEvidenceLedgerSchema = reviewEvidenceLedgerPayloadSchema
@@ -110,6 +117,7 @@ export function prepareCommonProbe(input: {
 
 export function assembleReviewEvidenceLedger(input: {
   readonly capabilities: CapabilityPreflight;
+  readonly commonWork: CommonReviewWork;
   readonly github: ExactHeadGitHubEvidence;
   readonly identity: ReviewEvidenceLedgerIdentity;
   readonly manifest: ReviewEvidenceManifest;
@@ -129,6 +137,7 @@ export function assembleReviewEvidenceLedger(input: {
     throw new Error("Evidence components do not match the trusted review");
   }
   const probes = z.array(commonEvidenceProbeSchema).parse(input.probes);
+  const commonWork = commonReviewWorkSchema.parse(input.commonWork);
   const probeGaps = probes
     .filter((probe) => probe.outcome === "failed")
     .map((probe) =>
@@ -143,17 +152,19 @@ export function assembleReviewEvidenceLedger(input: {
     );
   const gaps = [...input.github.gaps, ...probeGaps];
   const payload = reviewEvidenceLedgerPayloadSchema.parse({
-    schemaVersion: 1,
+    schemaVersion: 2,
     identity,
     components: {
       patchManifestDigest: digestJson(input.manifest),
       capabilityDigest: input.capabilities.digest,
       githubDigest: input.github.digest,
       probesDigest: digestJson(probes),
+      commonWorkDigest: digestCommonWorkValue(commonWork),
     },
     github: input.github,
     probes,
     gaps,
+    commonWork,
   });
   return reviewEvidenceLedgerSchema.parse({
     ...payload,
@@ -172,7 +183,9 @@ export function validateReviewEvidenceLedgerComponents(
     ledger.components.patchManifestDigest !== digestJson(input.manifest) ||
     ledger.components.capabilityDigest !== input.capabilities.digest ||
     ledger.components.githubDigest !== ledger.github.digest ||
-    ledger.components.probesDigest !== digestJson(ledger.probes)
+    ledger.components.probesDigest !== digestJson(ledger.probes) ||
+    ledger.components.commonWorkDigest !==
+      digestCommonWorkValue(ledger.commonWork)
   ) {
     throw new Error("Prepared evidence components failed ledger validation");
   }

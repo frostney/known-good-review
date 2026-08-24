@@ -97,6 +97,13 @@ function reviewAxis(route: ReviewRoute): string {
   return route.role;
 }
 
+function reviewPhase(route: ReviewRoute): string {
+  if (route.role === "lane") return "fresh-axes";
+  if (route.role === "revalidation") return "revalidation";
+  if (route.role === "scout") return "axis-investigation";
+  return "coordination";
+}
+
 function symbolicErrorClass(value: string): string {
   const normalized = value
     .toUpperCase()
@@ -380,7 +387,9 @@ export default defineHook({
           turnId: event.data.turnId,
           stepIndex: event.data.stepIndex,
           reviewKind: reviewKind(attributes),
+          phase: reviewPhase(route),
           reviewAxis: reviewAxis(route),
+          attempt: route.attempt,
           memoryPolicyHash: memoryPolicyHash(),
           requestedModel,
           actualModel: generation?.model ?? requestedModel,
@@ -421,7 +430,9 @@ export default defineHook({
           turnId: event.data.turnId,
           stepIndex: event.data.stepIndex,
           reviewKind: reviewKind(ctx.session.auth.current?.attributes ?? {}),
+          phase: reviewPhase(route),
           reviewAxis: reviewAxis(route),
+          attempt: route.attempt,
           memoryPolicyHash: memoryPolicyHash(),
           requestedModel,
           actualModel: null,

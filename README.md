@@ -136,8 +136,10 @@ action-required when an active axis cannot complete. The aggregate Check owns
 the configured blocking policy. Before lanes start, the app records one
 immutable evidence ledger for the exact review. Its digest binds the patch
 manifest, capability inventory, exact-head Checks, digest-validated workflow
-artifact archives, common probes, and typed gap dispositions. Every lane
-receives that same ledger digest and shared evidence. Artifact contents remain
+artifact archives, shared repository history and memory, common probes, and
+typed gap dispositions. Stable work identities make reuse observable. Every
+attempt-zero axis starts concurrently after this application-owned preparation
+and receives the same ledger digest and shared evidence. Artifact contents remain
 untrusted data in the credential-free sandbox and are never executed. GitHub
 presentation is derived deterministically from the validated v2 report without
 another model call.
@@ -155,6 +157,7 @@ current Eve/Vercel runtime contract.
 bun install
 bunx convex dev
 bun run check
+bun run replay:pr61
 bun run dev
 ```
 
@@ -163,6 +166,12 @@ discovered surface, and builds without provisioning a hosted sandbox snapshot.
 It does not call a paid model. Convex code is also type-checked locally; a
 Convex deployment is needed only to regenerate bindings or exercise HTTP
 actions.
+
+`bun run replay:pr61` validates all four recorded Pascal MCP SDK PR 61 runs
+offline and prints phase-by-phase recorded and projected candidate timings,
+worker consumption, stable common-work reuse, tokens, costs, finding
+transitions, publication attempts, and recovery work. Its performance values
+are measurements only and cannot stop, shorten, accept, or reject a review.
 
 The production sandbox has GitHub-only egress, no repository credentials, and
 one persistent Eve sandbox per PR session. Eve stops compute after each turn
