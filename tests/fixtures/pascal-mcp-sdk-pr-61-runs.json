@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "fixture": "pascal-mcp-sdk-pr-61-review-lifecycle",
+  "repository": "frostney/pascal-mcp-sdk",
+  "pullRequest": 61,
+  "capturedAt": "2026-08-24T12:00:00.000Z",
+  "runs": [
+    {
+      "runId": "wrun_41M0NY3R8M0GTQ4YK9BDMY2K1Q",
+      "planKind": "full",
+      "identity": {
+        "baseSha": "5d3ec5527d1b3b0b636596a3e249a68ffe38b32d",
+        "headSha": "6984699830bf29ba44a0cd0e13abc889b7d81dbd",
+        "patchFingerprint": "ec01b531ea853ea4a30532853fb891101ab6173a2772d3bdb36e4e4af0868e8a"
+      },
+      "createdAt": "2026-08-22T23:50:18.752Z",
+      "startedAt": "2026-08-22T23:50:19.427Z",
+      "completedAt": "2026-08-23T00:05:16.538Z",
+      "preparedEvidence": { "manifestEntries": 11, "commonWorkKinds": ["patch-manifest", "capability-preflight", "github-evidence", "repository-history", "repository-memory", "common-probe"] },
+      "laneCheckpoints": [
+        { "axis": "deduplication", "attempt": 0, "status": "complete", "reviewedEntries": [0,1,2,3,4,5,6,7,8,9,10], "remainingEntries": [] },
+        { "axis": "claim-and-specification", "attempt": 0, "status": "complete", "reviewedEntries": [0,1,2,3,4,5,6,7,8,9,10], "remainingEntries": [] },
+        { "axis": "engineering-quality", "attempt": 0, "status": "complete", "reviewedEntries": [0,1,2,3,4,5,6,7,8,9,10], "remainingEntries": [] },
+        { "axis": "discoverability", "attempt": 0, "status": "complete", "reviewedEntries": [0,1,2,3,4,5,6,7,8,9,10], "remainingEntries": [] }
+      ],
+      "revalidation": [],
+      "durableState": { "stage": "published" },
+      "publicationInput": { "selectedFindingIds": [], "canonicalFindingIds": ["CR-1", "CR-2", "CR-3", "CR-4"], "verdict": "REQUEST_CHANGES" },
+      "workers": [
+        { "role": "axis", "axis": "claim-and-specification", "attempt": 0, "startedAt": "2026-08-22T23:51:55.839Z", "completedAt": "2026-08-22T23:56:55.434Z" },
+        { "role": "axis", "axis": "deduplication", "attempt": 0, "startedAt": "2026-08-22T23:56:55.470Z", "completedAt": "2026-08-23T00:01:24.162Z" },
+        { "role": "axis", "axis": "engineering-quality", "attempt": 0, "startedAt": "2026-08-22T23:56:55.471Z", "completedAt": "2026-08-23T00:01:24.986Z" },
+        { "role": "axis", "axis": "discoverability", "attempt": 0, "startedAt": "2026-08-22T23:56:55.471Z", "completedAt": "2026-08-23T00:01:25.525Z" }
+      ],
+      "usage": { "inputTokens": 1678864, "cachedInputTokens": 1342377, "cacheCreationInputTokens": 336304, "outputTokens": 36684, "costUsd": 1.4764414 },
+      "subagentRuns": 4,
+      "telemetry": { "modelGenerations": null, "retries": null },
+      "findingTransitions": [
+        { "findingId": "CR-1", "before": "absent", "after": "open" },
+        { "findingId": "CR-2", "before": "absent", "after": "open" },
+        { "findingId": "CR-3", "before": "absent", "after": "open" },
+        { "findingId": "CR-4", "before": "absent", "after": "open" }
+      ],
+      "publication": { "attempts": 1, "published": true, "recoveryWork": [] }
+    },
+    {
+      "runId": "wrun_41M0NZHCXB0GM1XGJWG0TMTBB3",
+      "planKind": "delta",
+      "identity": {
+        "baseSha": "5d3ec5527d1b3b0b636596a3e249a68ffe38b32d",
+        "headSha": "94a426ef48cbb392ce3d1caad4c1733530869335",
+        "patchFingerprint": "8db9ad2f546db251d9513c36d1170c494c38bee1fb10ab051063ccd98203a101"
+      },
+      "createdAt": "2026-08-23T00:15:14.447Z",
+      "startedAt": "2026-08-23T00:15:14.475Z",
+      "completedAt": "2026-08-23T00:30:12.344Z",
+      "preparedEvidence": { "manifestEntries": 2, "commonWorkKinds": ["patch-manifest", "capability-preflight", "github-evidence", "repository-history", "repository-memory", "common-probe"] },
+      "laneCheckpoints": [
+        { "axis": "deduplication", "attempt": 0, "status": "complete", "reviewedEntries": [0,1], "remainingEntries": [] },
+        { "axis": "claim-and-specification", "attempt": 0, "status": "complete", "reviewedEntries": [0,1], "remainingEntries": [] },
+        { "axis": "engineering-quality", "attempt": 0, "status": "complete", "reviewedEntries": [0,1], "remainingEntries": [] },
+        { "axis": "discoverability", "attempt": 0, "status": "complete", "reviewedEntries": [0,1], "remainingEntries": [] }
+      ],
+      "revalidation": [
+        { "findingId": "CR-1", "outcome": "fixed" },
+        { "findingId": "CR-2", "outcome": "fixed" },
+        { "findingId": "CR-3", "outcome": "fixed" }
+      ],
+      "durableState": { "stage": "published" },
+      "publicationInput": { "selectedFindingIds": ["CR-1", "CR-2", "CR-3"], "canonicalFindingIds": ["CR-1", "CR-2", "CR-3", "CR-4", "CR-5"], "verdict": "APPROVE_WITH_IMPROVEMENTS" },
+      "workers": [
+        { "role": "axis", "axis": "claim-and-specification", "attempt": 0, "startedAt": "2026-08-23T00:17:55.164Z", "completedAt": "2026-08-23T00:21:40.003Z" },
+        { "role": "axis", "axis": "deduplication", "attempt": 0, "startedAt": "2026-08-23T00:21:40.021Z", "completedAt": "2026-08-23T00:25:45.088Z" },
+        { "role": "axis", "axis": "engineering-quality", "attempt": 0, "startedAt": "2026-08-23T00:21:40.023Z", "completedAt": "2026-08-23T00:25:45.448Z" },
+        { "role": "axis", "axis": "discoverability", "attempt": 0, "startedAt": "2026-08-23T00:21:40.035Z", "completedAt": "2026-08-23T00:25:46.153Z" },
+        { "role": "revalidation", "axis": null, "attempt": 0, "startedAt": "2026-08-23T00:25:46.156Z", "completedAt": "2026-08-23T00:27:00.918Z" },
+        { "role": "revalidation", "axis": null, "attempt": 0, "startedAt": "2026-08-23T00:25:46.157Z", "completedAt": "2026-08-23T00:27:01.517Z" },
+        { "role": "revalidation", "axis": null, "attempt": 0, "startedAt": "2026-08-23T00:25:46.157Z", "completedAt": "2026-08-23T00:27:02.202Z" }
+      ],
+      "usage": { "inputTokens": 1489959, "cachedInputTokens": 1221426, "cacheCreationInputTokens": 268305, "outputTokens": 38028, "costUsd": 1.2957837 },
+      "subagentRuns": 7,
+      "telemetry": { "modelGenerations": null, "retries": null },
+      "findingTransitions": [
+        { "findingId": "CR-1", "before": "open", "after": "fixed" },
+        { "findingId": "CR-2", "before": "open", "after": "fixed" },
+        { "findingId": "CR-3", "before": "open", "after": "fixed" },
+        { "findingId": "CR-4", "before": "open", "after": "open" },
+        { "findingId": "CR-5", "before": "absent", "after": "open" }
+      ],
+      "publication": { "attempts": 1, "published": true, "recoveryWork": [] }
+    },
+    {
+      "runId": "wrun_41M0P0JYYZ0GZCDNSRT5M82S0N",
+      "planKind": "delta",
+      "identity": {
+        "baseSha": "5d3ec5527d1b3b0b636596a3e249a68ffe38b32d",
+        "headSha": "c61ac3256822818c14ede9af6cf7f66f12d23331",
+        "patchFingerprint": "b123e3670043f27c1f49eef18e0c84a1e0390a2d9dc1882eec090113d030b65e"
+      },
+      "createdAt": "2026-08-23T00:33:34.308Z",
+      "startedAt": "2026-08-23T00:33:34.575Z",
+      "completedAt": "2026-08-23T00:47:07.845Z",
+      "preparedEvidence": { "manifestEntries": 1, "commonWorkKinds": ["patch-manifest", "capability-preflight", "github-evidence", "repository-history", "repository-memory", "common-probe"] },
+      "laneCheckpoints": [
+        { "axis": "deduplication", "attempt": 0, "status": "complete", "reviewedEntries": [0], "remainingEntries": [] },
+        { "axis": "claim-and-specification", "attempt": 0, "status": "complete", "reviewedEntries": [0], "remainingEntries": [] },
+        { "axis": "engineering-quality", "attempt": 0, "status": "complete", "reviewedEntries": [0], "remainingEntries": [] },
+        { "axis": "discoverability", "attempt": 0, "status": "complete", "reviewedEntries": [0], "remainingEntries": [] }
+      ],
+      "revalidation": [{ "findingId": "CR-5", "outcome": "fixed" }],
+      "durableState": { "stage": "published" },
+      "publicationInput": { "selectedFindingIds": ["CR-5"], "canonicalFindingIds": ["CR-1", "CR-2", "CR-3", "CR-4", "CR-5", "CR-6", "CR-7"], "verdict": "APPROVE_WITH_IMPROVEMENTS" },
+      "workers": [
+        { "role": "axis", "axis": "claim-and-specification", "attempt": 0, "startedAt": "2026-08-23T00:35:39.649Z", "completedAt": "2026-08-23T00:40:13.032Z" },
+        { "role": "axis", "axis": "deduplication", "attempt": 0, "startedAt": "2026-08-23T00:40:13.054Z", "completedAt": "2026-08-23T00:43:41.810Z" },
+        { "role": "axis", "axis": "engineering-quality", "attempt": 0, "startedAt": "2026-08-23T00:40:13.054Z", "completedAt": "2026-08-23T00:43:42.303Z" },
+        { "role": "axis", "axis": "discoverability", "attempt": 0, "startedAt": "2026-08-23T00:40:13.054Z", "completedAt": "2026-08-23T00:43:42.987Z" },
+        { "role": "revalidation", "axis": null, "attempt": 0, "startedAt": "2026-08-23T00:43:43.002Z", "completedAt": "2026-08-23T00:44:42.575Z" }
+      ],
+      "usage": { "inputTokens": 1307652, "cachedInputTokens": 1135674, "cacheCreationInputTokens": 171792, "outputTokens": 41560, "costUsd": 1.0725868 },
+      "subagentRuns": 5,
+      "telemetry": { "modelGenerations": null, "retries": null },
+      "findingTransitions": [
+        { "findingId": "CR-4", "before": "open", "after": "open" },
+        { "findingId": "CR-5", "before": "open", "after": "fixed" },
+        { "findingId": "CR-6", "before": "absent", "after": "open" },
+        { "findingId": "CR-7", "before": "absent", "after": "open" }
+      ],
+      "publication": { "attempts": 1, "published": true, "recoveryWork": [] }
+    },
+    {
+      "runId": "wrun_41M0P1H9M60GVJ96XQK7ZDSMNB",
+      "planKind": "delta",
+      "identity": {
+        "baseSha": "5d3ec5527d1b3b0b636596a3e249a68ffe38b32d",
+        "headSha": "709983d85e34354a4acd0938af6f67469edd612e",
+        "patchFingerprint": "01d5dcc71c9abdf11a09b546ec6a9909a55c2d8e18a1dc75cd1715119e24755d"
+      },
+      "createdAt": "2026-08-23T00:50:08.205Z",
+      "startedAt": "2026-08-23T00:50:08.365Z",
+      "completedAt": "2026-08-23T01:02:21.217Z",
+      "preparedEvidence": { "manifestEntries": 1, "commonWorkKinds": ["patch-manifest", "capability-preflight", "github-evidence", "repository-history", "repository-memory", "common-probe"] },
+      "laneCheckpoints": [
+        { "axis": "deduplication", "attempt": 0, "status": "complete", "reviewedEntries": [0], "remainingEntries": [] },
+        { "axis": "claim-and-specification", "attempt": 0, "status": "complete", "reviewedEntries": [0], "remainingEntries": [] },
+        { "axis": "engineering-quality", "attempt": 0, "status": "complete", "reviewedEntries": [0], "remainingEntries": [] },
+        { "axis": "discoverability", "attempt": 0, "status": "complete", "reviewedEntries": [0], "remainingEntries": [] }
+      ],
+      "revalidation": [
+        { "findingId": "CR-6", "outcome": "fixed" },
+        { "findingId": "CR-7", "outcome": "fixed" }
+      ],
+      "durableState": { "stage": "report-reconciled" },
+      "publicationInput": { "selectedFindingIds": ["CR-6", "CR-7"], "canonicalFindingIds": ["CR-1", "CR-2", "CR-3", "CR-4", "CR-5", "CR-6", "CR-7"], "verdict": null },
+      "workers": [
+        { "role": "axis", "axis": "claim-and-specification", "attempt": 0, "startedAt": "2026-08-23T00:51:33.246Z", "completedAt": "2026-08-23T00:54:18.401Z" },
+        { "role": "axis", "axis": "deduplication", "attempt": 0, "startedAt": "2026-08-23T00:54:18.416Z", "completedAt": "2026-08-23T00:57:57.269Z" },
+        { "role": "axis", "axis": "engineering-quality", "attempt": 0, "startedAt": "2026-08-23T00:54:18.416Z", "completedAt": "2026-08-23T00:57:57.960Z" },
+        { "role": "axis", "axis": "discoverability", "attempt": 0, "startedAt": "2026-08-23T00:54:18.416Z", "completedAt": "2026-08-23T00:57:58.622Z" },
+        { "role": "revalidation", "axis": null, "attempt": 0, "startedAt": "2026-08-23T00:57:58.660Z", "completedAt": "2026-08-23T01:00:15.652Z" }
+      ],
+      "usage": { "inputTokens": 1550164, "cachedInputTokens": 1258768, "cacheCreationInputTokens": 291186, "outputTokens": 47948, "costUsd": 1.4596186 },
+      "subagentRuns": 5,
+      "telemetry": { "modelGenerations": null, "retries": null },
+      "findingTransitions": [
+        { "findingId": "CR-4", "before": "open", "after": "open" },
+        { "findingId": "CR-6", "before": "open", "after": "fixed" },
+        { "findingId": "CR-7", "before": "open", "after": "fixed" }
+      ],
+      "publication": { "attempts": 0, "published": false, "recoveryWork": ["report-reconciliation", "publication"] }
+    }
+  ]
+}

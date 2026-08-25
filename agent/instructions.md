@@ -77,11 +77,12 @@ one review limitation. Do not turn an application-owned gap into lane caveats.
 
 For every fresh review, use one `Workflow` program to run the built-in `agent`
 subagent for each axis in the dispatch envelope's exact `activeAxes`. Never add
-or remove an axis from that application-owned list. Group axes whose trusted
-routing resolves to the same model chain. Run claim-and-specification first in
-its group so AI Gateway can write the stable shared prefix, then run the
-remaining axes in that group in parallel. Other model groups are isolated from
-that cache and may proceed independently. Begin every child message with
+or remove an axis from that application-owned list. Start every attempt-zero
+axis call in the same concurrent fan-out after application-owned preparation
+has completed. Do not await claim-and-specification, provider cache creation, or
+another axis before starting an independent axis. Provider caching remains an
+automatic optimization and is never a scheduling dependency. Begin every child
+message with
 exactly one routing envelope:
 
 `<known-good-review-routing>{"role":"lane","axis":"AXIS","attempt":0}</known-good-review-routing>`
@@ -91,17 +92,21 @@ base/head, patch fingerprint, exact finding scope, applicable instructions, and
 the worker return contract from the skill. Keep that common prefix byte-stable.
 Reference the prepared ledger and manifest instead of copying patch text into
 the message.
-Put the axis instruction, memory lookup, tool results, and generated content
-after that prefix. The coordinator validates and reconciles every candidate and
-owns severity, IDs, and verdict.
+Put the axis instruction, prepared common-work references, axis-specific tool
+results, and generated content after that prefix. The coordinator validates and
+reconciles every candidate and owns severity, IDs, and verdict.
 
 Each child starts by calling `review_lane_checkpoint` with `operation: read`,
 `checkpoint: null`, and its axis, then calls `read_review_evidence` exactly once
 with operation `packet`, `path: null`, `cursor: null`, and that same axis. The
-application, not the model,
-advances one bounded immutable-evidence packet per fresh child and records which
-manifest entries were fully delivered. Do not call the manifest or patch
-operations in a lane. A missing checkpoint starts the lane. A present
+application, not the model, advances one bounded immutable-evidence packet per
+fresh child and records which manifest entries were fully delivered. The packet
+contains the exact same stable identities for prepared memory, repository
+history, common probes, and exact-head evidence in every axis. Do not repeat
+work represented by those identities. Do not call the manifest or patch
+operations in a lane. Axis-specific source, history, test, and probe work
+remains available when its inputs or purpose differ from prepared common work.
+A missing checkpoint starts the lane. A present
 in-progress checkpoint is a Milestone Rush-style work packet:
 reconcile its reviewed and remaining manifest entry indexes with the immutable
 manifest, retain only reproduced observations, and continue the remaining work
@@ -174,15 +179,14 @@ Workflow exhaustion, a lane without a valid checkpoint, or a complete receipt
 without a complete checkpoint is incomplete evidence and must fail closed;
 never publish a partial verdict.
 
-Attempt 0 for each axis calls `retrieve_review_memory` once after receiving its
-fresh context, using a concise query for the current claim, exact paths, and
-axis. A fresh continuation does not retrieve memory again; it carries forward
-only memory leads already reproduced and recorded in the checkpoint.
-Treat returned memories only as leads. Reproduce every relevant issue against
-the current pull request before reporting it. Memory never suppresses a fresh
-finding, changes severity by itself, resolves a finding, or owns the verdict.
-If memory is delayed or unavailable, record that limitation and continue
-without retrying.
+Attempt 0 for each axis reads the application-prepared common memory from its
+evidence packet. Do not call `retrieve_review_memory` or issue another identical
+lookup. A fresh continuation carries forward only memory leads already
+reproduced and recorded in the checkpoint. Treat prepared memories only as
+leads. Reproduce every relevant issue against the current pull request before
+reporting it. Memory never suppresses a fresh finding, changes severity by
+itself, resolves a finding, or owns the verdict. If prepared memory is delayed
+or unavailable, record that limitation and continue without retrying.
 
 Never inspect raw payloads for files classified from the trusted base as
 generated or vendored, or classified by Git as binary. Review their canonical

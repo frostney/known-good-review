@@ -11,6 +11,7 @@ import {
   writeReviewEvidenceLedger,
 } from "../src/review/evidence-ledger";
 import { prepareExactHeadGitHubEvidence } from "../src/review/github-evidence";
+import { commonWorkFixture } from "./common-work-fixture";
 
 const identity = {
   baseSha: "1".repeat(40),
@@ -19,7 +20,7 @@ const identity = {
 };
 
 const ledgerIdentity = {
-  executionRevision: "review-evidence-v1" as const,
+  executionRevision: "review-evidence-v2" as const,
   repositoryId: "R_test",
   repositoryDatabaseId: 41,
   repository: "frostney/pascal-mcp-sdk",
@@ -86,6 +87,7 @@ async function prepareLaneEvidence(observed: ReturnType<typeof sandbox>) {
     observed.runtime,
     assembleReviewEvidenceLedger({
       capabilities: capabilities.preflight,
+      commonWork: commonWorkFixture(ledgerIdentity),
       github: github.evidence,
       identity: ledgerIdentity,
       manifest,
@@ -168,6 +170,8 @@ describe("review capability preflight", () => {
       specification.capabilityPreflight.digest,
     );
     expect(engineering.ledgerDigest).toBe(specification.ledgerDigest);
+    expect(engineering.commonWork).toEqual(specification.commonWork);
+    expect(engineering.commonWork.records).toHaveLength(6);
     expect(observed.commands).toHaveLength(1);
   });
 

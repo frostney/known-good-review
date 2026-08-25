@@ -2,8 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import type { RuntimeSandboxSession } from "eve/sandbox";
 import { getEncoding } from "js-tiktoken";
 import { z } from "zod";
+import type { ReviewConfig } from "../config/review-config";
 import type { TrustedGitHubContext } from "../github/trusted-context";
 import { prepareReviewWorkspace } from "../github/review-workspace";
+import type { MemoryAvailability } from "../memory/client";
+import { memoryPolicyHash } from "../memory/policy";
 import {
   readCapabilityPreflight,
   runCapabilityPreflight,
@@ -31,6 +34,13 @@ import {
   writeReviewEvidenceManifest,
 } from "./evidence-bundle";
 import type { PreparedGitHubEvidence } from "./github-evidence";
+import {
+  commonHistorySchema,
+  commonMemoryQuery,
+  commonReviewWorkSchema,
+  commonWorkRecord,
+  prepareCommonMemory,
+} from "./common-work";
 
 export const reviewFileScopeSchema = z
   .array(
@@ -50,6 +60,8 @@ export const reviewFileScopeSchema = z
   });
 
 export type ReviewFileScope = z.infer<typeof reviewFileScopeSchema>;
+
+const preparedHistoryLimit = 200;
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
@@ -79,6 +91,54 @@ function matchesPreparedScope(
         entry.status === files[index]?.status,
     )
   );
+}
+
+async function prepareCommonHistory(
+  sandbox: RuntimeSandboxSession,
+  identity: ReviewEvidenceLedgerIdentity,
+  files: ReviewFileScope,
+) {
+  const paths = [...files.map((file) => file.path)].sort();
+  const historyIdentity = {
+    executionRevision: "review-common-work-v1",
+    repositoryId: identity.repositoryId,
+    baseSha: identity.baseSha,
+    headSha: identity.headSha,
+    patchFingerprint: identity.patchFingerprint,
+    paths,
+    limit: preparedHistoryLimit,
+  };
+  const command = paths.length === 0
+    ? null
+    : `cd /workspace && git log --format=%H --max-count=${preparedHistoryLimit + 1} ${shellQuote(identity.baseSha)} -- ${paths.map(shellQuote).join(" ")}`;
+  const result = command
+    ? await sandbox.run({ command })
+    : { exitCode: 0, stdout: "", stderr: "" };
+  if (result.exitCode !== 0) {
+    throw new Error("Could not prepare common repository history");
+  }
+  const observed = String(result.stdout)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (observed.some((sha) => !/^[a-f0-9]{40}$/.test(sha))) {
+    throw new Error("Prepared repository history contained an invalid revision");
+  }
+  const output = {
+    baseSha: identity.baseSha,
+    paths,
+    commitShas: observed.slice(0, preparedHistoryLimit),
+    truncated: observed.length > preparedHistoryLimit,
+  };
+  const record = commonWorkRecord({
+    kind: "repository-history",
+    identity: historyIdentity,
+    output,
+  });
+  return {
+    record,
+    history: commonHistorySchema.parse({ workId: record.id, ...output }),
+  };
 }
 
 async function preparedLedger(
@@ -118,6 +178,8 @@ export async function prepareReviewEvidence(
   inputFiles: unknown,
   input: {
     readonly collectGitHubEvidence: () => Promise<PreparedGitHubEvidence>;
+    readonly collectMemory: (query: string) => Promise<MemoryAvailability>;
+    readonly config: Pick<ReviewConfig, "embedding">;
     readonly planKind: "full" | "delta";
   },
 ): Promise<ReviewEvidenceLedger> {
@@ -131,7 +193,7 @@ export async function prepareReviewEvidence(
   }
   const files = reviewFileScopeSchema.parse(inputFiles);
   const identity: ReviewEvidenceLedgerIdentity = {
-    executionRevision: "review-evidence-v1",
+    executionRevision: "review-evidence-v2",
     repositoryId: trusted.repositoryId,
     repositoryDatabaseId: trusted.repositoryDatabaseId,
     repository: trusted.repository,
@@ -142,7 +204,16 @@ export async function prepareReviewEvidence(
     planKind: input.planKind,
   };
   const existing = await preparedLedger(sandbox, identity, files);
-  if (existing) return existing;
+  if (existing) {
+    console.info(
+      JSON.stringify({
+        event: "known-good-review.common_work.reused",
+        ledgerDigest: existing.digest,
+        commonWorkIds: existing.commonWork.records.map((record) => record.id),
+      }),
+    );
+    return existing;
+  }
 
   await prepareReviewWorkspace(trusted, sandbox);
   await resetReviewEvidence(sandbox, trusted.patchFingerprint);
@@ -273,8 +344,55 @@ export async function prepareReviewEvidence(
       stderr: String(diffCheck.stderr),
     }),
   ];
+  const query = commonMemoryQuery(files);
+  const [preparedHistory, memoryAvailability] = await Promise.all([
+    prepareCommonHistory(sandbox, identity, files),
+    input.collectMemory(query),
+  ]);
+  const preparedMemory = prepareCommonMemory({
+    availability: memoryAvailability,
+    config: input.config,
+    identity,
+    policyHash: memoryPolicyHash(),
+    query,
+  });
+  const commonWork = commonReviewWorkSchema.parse({
+    executionRevision: "review-common-work-v1",
+    records: [
+      commonWorkRecord({
+        kind: "patch-manifest",
+        identity: { identity, files },
+        output: manifest,
+      }),
+      commonWorkRecord({
+        kind: "capability-preflight",
+        identity,
+        output: capabilities.preflight,
+      }),
+      commonWorkRecord({
+        kind: "github-evidence",
+        identity: {
+          repositoryDatabaseId: identity.repositoryDatabaseId,
+          headSha: identity.headSha,
+        },
+        output: preparedGitHub.evidence,
+      }),
+      preparedHistory.record,
+      preparedMemory.record,
+      ...probes.map((probe) =>
+        commonWorkRecord({
+          kind: "common-probe",
+          identity: { identity, id: probe.id, command: probe.command },
+          output: probe,
+        }),
+      ),
+    ],
+    history: preparedHistory.history,
+    memory: preparedMemory.memory,
+  });
   const ledger = assembleReviewEvidenceLedger({
     capabilities: capabilities.preflight,
+    commonWork,
     github: preparedGitHub.evidence,
     identity,
     manifest,
@@ -283,8 +401,9 @@ export async function prepareReviewEvidence(
   await writeReviewEvidenceLedger(sandbox, ledger);
   console.info(
     JSON.stringify({
-      event: "known-good-review.evidence_ledger.completed",
+      event: "known-good-review.common_work.completed",
       digest: ledger.digest,
+      commonWorkIds: ledger.commonWork.records.map((record) => record.id),
       gaps: ledger.gaps.map((gap) => gap.id),
     }),
   );

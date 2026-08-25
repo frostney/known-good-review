@@ -55,7 +55,11 @@ phase without putting preparation commands or raw patches in model history.
 Its immutable ledger binds the trusted repository, pull request, base, head,
 patch, plan, and execution revision to component digests for the classified
 patch, capability inventory, exact-head GitHub Checks, workflow artifacts,
-common probes, and typed gaps.
+common probes, and typed gaps. The same ledger records stable content-derived
+identities for shared patch preparation, capability discovery, exact-head
+evidence, repository history, repository memory, and probes. Prepared memory
+contains only normalized findings and provenance; prepared history contains
+only revision identities and paths.
 
 The trusted application boundary lists Checks and workflow runs at the exact
 head. It accepts only unexpired artifact archives whose workflow repository,
@@ -78,11 +82,14 @@ AI Gateway receives the first model and its ordered `models` fallback array.
 The Gateway generation lookup records the actual model and provider that
 served the response, including when a fallback succeeded.
 
-Every active axis is a fresh invocation. Claim-and-specification runs first
-within its configured model group, then the remaining same-model axes run in
-parallel. Eve and AI Gateway own automatic provider caching. Memory retrieval
-occurs after the stable shared prefix and is advisory evidence that each axis
-must revalidate against the current pull request.
+Every active axis is a fresh invocation and every attempt-zero axis starts in
+one concurrent fan-out as soon as application-owned preparation completes.
+No axis waits for claim-and-specification or provider cache creation. Eve and
+AI Gateway may still cache stable prefixes automatically, but caching does not
+control scheduling. Every lane packet carries the same stable common-work
+identities and prepared results. Axis-specific investigation and continuation
+checkpoints remain independent. Prepared repository memory is advisory evidence
+that each axis must revalidate against the current pull request.
 
 Each lane writes one compact checkpoint before it returns. A complete
 checkpoint owns the terminal worker report and prevents duplicate work; the
@@ -200,8 +207,10 @@ sandbox. The GitHub state artifact remains so review history is auditable.
 OpenTelemetry inputs and outputs are disabled. Eve emits its normal structural
 run tags, while the metadata hook records Gateway generation model/provider,
 tokens, cache tokens, exact USD cost, generation time, latency, outcome, and
-review kind. Generation lookup failures are visible but do not expose prompts
-or source.
+review kind. Offline replay deduplicates measurements by Agent Run, session,
+and generation identity, then compares recorded and candidate phases without
+using any measurement as an acceptance gate. Generation lookup failures are
+visible but do not expose prompts or source.
 
 Eve caps the complete review execution tree at 8,000,000 provider-reported
 input tokens and 512,000 output tokens. Child sessions receive shares of the

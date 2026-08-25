@@ -1,6 +1,7 @@
 import { defineHook } from "eve/hooks";
 import { toolResultFrom } from "eve/tools";
 import { z } from "zod";
+import { parseReviewConfig } from "../../src/config/review-config";
 import { githubAdapter } from "../../src/github/chat-adapter";
 import { collectExactHeadGitHubEvidence } from "../../src/github/exact-head-evidence";
 import { prepareReviewEvidence } from "../../src/review/prepare-review-evidence";
@@ -9,6 +10,8 @@ import {
   trustedGitHubContext,
 } from "../../src/github/trusted-context";
 import verifyReviewHeadTool from "../tools/verify_review_head";
+import { retrieveReviewMemory } from "../../src/memory/client";
+import { routingAttribute } from "../../src/models/routing";
 
 const reviewPlanSchema = z.object({ kind: z.enum(["full", "delta"]) });
 
@@ -39,12 +42,25 @@ export default defineHook({
         throw new Error("Trusted review context is missing the review plan");
       }
       const plan = reviewPlanSchema.parse(JSON.parse(rawPlan));
-      await prepareReviewEvidence(
+      const configSource = ctx.session.auth.current?.attributes[routingAttribute];
+      const config = parseReviewConfig(
+        typeof configSource === "string" ? configSource : null,
+      );
+      const preparationStartedAt = performance.now();
+      const ledger = await prepareReviewEvidence(
         await ctx.getSandbox(),
         trusted,
         JSON.parse(rawFiles),
         {
+          config,
           planKind: plan.kind,
+          collectMemory: (query) =>
+            retrieveReviewMemory({
+              config,
+              repositoryId: trusted.repositoryId,
+              axis: "claim-and-specification",
+              query,
+            }),
           collectGitHubEvidence: () =>
             collectExactHeadGitHubEvidence(
               githubAdapter(trusted.installationId).octokit,
@@ -56,6 +72,16 @@ export default defineHook({
               },
             ),
         },
+      );
+      console.info(
+        JSON.stringify({
+          event: "known-good-review.phase.completed",
+          phase: "common-preparation",
+          sessionId: ctx.session.id,
+          durationMs: performance.now() - preparationStartedAt,
+          ledgerDigest: ledger.digest,
+          commonWorkIds: ledger.commonWork.records.map((record) => record.id),
+        }),
       );
     },
   },
