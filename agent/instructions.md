@@ -119,8 +119,16 @@ the application-recorded completed entries returned by the packet; its
 `remainingEntries` are the exact complement. A complete lane records full path
 coverage, leaves the checkpoint observations, next steps, and limitations
 arrays empty, and returns
-`status: complete`, storing the skill's worker report and all terminal details
-in `completedReport`. An in-progress checkpoint uses `completedReport: null`.
+`status: complete`, storing its terminal details in the typed
+`completedReport` object. That object binds the exact `axis` and contains
+`scope` (`claim`, `dirtyState`, and `inspectedSupportingContext`), `coverage`
+(`staticOnly` and `unreached`), `churn`, exact `probes`, every
+evidence-supported `candidate`, `verifiedClaims`, and `limitations`. Each
+candidate contains title, location, evidence, impact, smallest remedy,
+static-only status, applicable churn evidence, and uncertainty. Do not put
+finding IDs, severity, category, finding status, verdict, or trusted review
+identity in a lane report; reconciliation and typed application code own those
+fields. An in-progress checkpoint uses `completedReport: null`.
 A child that reads a complete checkpoint returns complete
 status without repeating the lane. A lane that has made useful progress
 with another evidence packet records reviewed entries, remaining entries,
@@ -154,21 +162,24 @@ coordinator-mediated flow is required because Eve root copies cannot delegate
 another built-in root copy. Continue until every axis is complete. Run every
 lane call in task mode with a strict object containing its exact `axis`,
 `status` as `complete` or `incomplete`, and `scoutRequests` as a bounded string
-array. The terminal report follows
-the skill's worker return contract and lives only in the checkpoint.
+array. The terminal report follows the skill's worker return contract through
+the checkpoint's typed schema and lives only in the checkpoint.
 Loop only on an explicit `incomplete` result; Eve already retries supported
 transient failures, and a terminal child failure must fail closed instead of
 restarting uncheckpointed work. After Workflow reports every axis complete,
 call `review_recovery` with `operation: advance` and `stage: axes-complete`.
 The application validates every exact checkpoint before advancing. The
 coordinator then reads every exact checkpoint in one parallel tool-call batch
-using `operation: read` and `checkpoint: null`, and reconciles their
-`completedReport` values into the draft content accepted by
-`assemble_review_report`. The draft excludes report identity, prior findings,
-finding IDs, verdict, and publication targets. Typed application code injects
-the trusted identity, merges the prior baseline and recorded revalidation,
-allocates stable new IDs, derives the verdict, validates the canonical v2
-report, and stages it durably before publication. The application derives
+using `operation: read` and `checkpoint: null`. Validate and reconcile only the
+typed `completedReport` fields into the strict draft accepted by
+`assemble_review_report`; never invent a missing lane field or substitute
+prose. The coordinator filters candidates, reconciles cross-lane duplicates
+and conflicts, and assigns severity, category, and fresh finding status. The
+draft excludes report identity, prior findings, finding IDs, verdict, and
+publication targets. Typed application code injects the trusted identity,
+merges the prior baseline and recorded revalidation, allocates stable new IDs,
+derives the verdict, validates the canonical v2 report, and stages it durably
+before publication. The application derives
 presentation deterministically from canonical text and the finding's location
 path and symbol. No presentation model or formatting retry participates in
 publication. The coordinator performs no additional repository inspection or

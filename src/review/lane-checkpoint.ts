@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ReviewAxis } from "./axes";
 import { reviewAxes } from "./axes";
+import { reviewFindingObjectSchema } from "./findings";
 
 const revisionSchema = z.string().regex(/^[a-f0-9]{40}$/);
 const fingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -10,6 +11,60 @@ const observationSchema = z.object({
   evidence: z.array(z.string().min(1).max(500)).max(12),
 });
 
+const boundedReportText = z.string().min(1).max(2_000);
+const laneReportCandidateSchema = reviewFindingObjectSchema
+  .omit({ id: true, severity: true, category: true, status: true })
+  .extend({
+    uncertainty: z.array(boundedReportText).max(12),
+  })
+  .strict();
+
+export const laneCompletedReportSchema = z
+  .object({
+    axis: z.enum(reviewAxes),
+    scope: z
+      .object({
+        claim: boundedReportText,
+        dirtyState: boundedReportText,
+        inspectedSupportingContext: z.array(boundedReportText).max(100),
+      })
+      .strict(),
+    coverage: z
+      .object({
+        staticOnly: z.array(boundedReportText).max(100),
+        unreached: z.array(boundedReportText).max(100),
+      })
+      .strict(),
+    churn: z
+      .object({
+        window: boundedReportText,
+        symbolCoverage: z.array(boundedReportText).max(100),
+        fileFallbacks: z.array(boundedReportText).max(100),
+      })
+      .strict(),
+    probes: z
+      .array(
+        z
+          .object({
+            commandOrAction: boundedReportText,
+            result: boundedReportText,
+          })
+          .strict(),
+      )
+      .max(100),
+    candidates: z.array(laneReportCandidateSchema).max(100),
+    verifiedClaims: z.array(boundedReportText).max(100),
+    limitations: z.array(boundedReportText).max(100),
+  })
+  .strict()
+  .refine(
+    (report) =>
+      Buffer.byteLength(JSON.stringify(report), "utf8") <= 24_000,
+    "A completed lane report must not exceed 24,000 UTF-8 bytes",
+  );
+
+export type LaneCompletedReport = z.infer<typeof laneCompletedReportSchema>;
+
 export const laneCheckpointContentSchema = z
   .object({
     status: z.enum(["in-progress", "complete"]),
@@ -18,16 +73,9 @@ export const laneCheckpointContentSchema = z
     observations: z.array(observationSchema).max(40),
     nextSteps: z.array(z.string().min(1).max(500)).max(20),
     limitations: z.array(z.string().min(1).max(500)).max(20),
-    completedReport: z
-      .string()
-      .min(1)
-      .max(24_000)
-      .refine(
-        (report) => Buffer.byteLength(report, "utf8") <= 24_000,
-        "A completed lane report must not exceed 24,000 UTF-8 bytes",
-      )
-      .nullable(),
+    completedReport: laneCompletedReportSchema.nullable(),
   })
+  .strict()
   .superRefine((checkpoint, ctx) => {
     if (checkpoint.status === "complete" && !checkpoint.completedReport) {
       ctx.addIssue({
@@ -63,7 +111,7 @@ export const laneCheckpointContentSchema = z
   });
 
 export const laneCheckpointSchema = laneCheckpointContentSchema.extend({
-  schemaVersion: z.literal(2),
+  schemaVersion: z.literal(3),
   axis: z.enum(reviewAxes),
   baseSha: revisionSchema,
   headSha: revisionSchema,
@@ -91,7 +139,19 @@ export interface LaneCheckpointSandbox {
 }
 
 const maxCheckpointBytes = 65_536;
-export const reviewExecutionRevision = "review-context-v2";
+export const reviewExecutionRevision = "review-context-v3";
+
+function validateCompletedReportAxis(
+  axis: ReviewAxis,
+  content: LaneCheckpointContent,
+): void {
+  if (
+    content.completedReport !== null &&
+    content.completedReport.axis !== axis
+  ) {
+    throw new Error("A completed lane report must match its checkpoint axis");
+  }
+}
 
 export function validateLaneCheckpointCoverage(
   content: LaneCheckpointContent,
@@ -169,6 +229,7 @@ export async function readLaneCheckpoint(
   });
   if (source === null) return null;
   const checkpoint = laneCheckpointSchema.parse(JSON.parse(source));
+  validateCompletedReportAxis(axis, checkpoint);
   if (
     checkpoint.axis !== axis ||
     checkpoint.baseSha !== identity.baseSha ||
@@ -189,6 +250,7 @@ export async function writeLaneCheckpoint(
   entryCount: number,
 ): Promise<LaneCheckpoint> {
   const parsedContent = laneCheckpointContentSchema.parse(content);
+  validateCompletedReportAxis(axis, parsedContent);
   validateLaneCheckpointCoverage(parsedContent, entryCount);
   const prior = await readLaneCheckpoint(sandbox, identity, axis);
   if (prior) validateLaneCheckpointCoverage(prior, entryCount);
@@ -203,7 +265,7 @@ export async function writeLaneCheckpoint(
     throw new Error("A completed review lane cannot be replaced");
   }
   const checkpoint = laneCheckpointSchema.parse({
-    schemaVersion: 2,
+    schemaVersion: 3,
     axis,
     ...identity,
     revision: (prior?.revision ?? 0) + 1,

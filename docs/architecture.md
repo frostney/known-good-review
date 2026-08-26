@@ -91,23 +91,28 @@ identities and prepared results. Axis-specific investigation and continuation
 checkpoints remain independent. Prepared repository memory is advisory evidence
 that each axis must revalidate against the current pull request.
 
-Each lane writes one compact checkpoint before it returns. A complete
-checkpoint owns the terminal worker report and prevents duplicate work; the
-Workflow returns only completion receipts. An incomplete checkpoint records
-reviewed and remaining manifest entry indexes, reproduced observations, next
-steps, and limitations. The same native Eve Workflow can start a fresh built-in
-subagent that reconciles that packet with the immutable manifest, without
-inheriting the prior model history. This reuses the checkpoint-and-reconcile
-semantics of Milestone Rush; it does not introduce another workflow runtime or
-state service.
+Each lane writes one compact schema-v3 checkpoint before it returns. A complete
+checkpoint owns a strict typed terminal report of its scope, coverage, churn,
+probes, candidates, verified claims, and limitations, and prevents duplicate
+work; the Workflow returns only completion receipts. Lane candidates contain
+evidence and remediation facts but no severity, category, status, identifier,
+or verdict. An incomplete checkpoint records reviewed and remaining manifest
+entry indexes, reproduced observations, next steps, and limitations. The same
+native Eve Workflow can start a fresh built-in subagent that reconciles that
+packet with the immutable manifest, without inheriting the prior model history.
+This reuses the checkpoint-and-reconcile semantics of Milestone Rush; it does
+not introduce another workflow runtime or state service.
 
 When a lane needs bounded related-source, history, rendered-page, or web
 evidence, the coordinator starts a fresh routed scout and passes its compact
 evidence to the next fresh lane. Selected-finding outcomes are persisted before
-report assembly. After all axis reports reconcile, typed application code
-merges prior and fresh findings, preserves stable prior IDs, assigns new IDs,
-injects trusted review identity, derives the verdict, validates the v2 report,
-and stages it beside the unchanged baseline. The app then derives exact-copy
+report assembly. After all typed axis reports pass application validation, the
+coordinator filters candidates, reconciles duplicates and conflicts, and
+assigns severity, category, and fresh status through the strict assembly
+contract. Typed application code then merges prior and fresh findings,
+preserves stable prior IDs, assigns new IDs, injects trusted review identity,
+derives the verdict, validates the v2 report, and stages it beside the
+unchanged baseline. The app then derives exact-copy
 text and code segments deterministically from canonical finding text, location
 paths, and symbols.
 

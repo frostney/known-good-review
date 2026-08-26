@@ -30,10 +30,12 @@ or act as a general-purpose GitHub assistant.
   review identity. Its digest binds the patch bundle, capability inventory,
   exact-head Checks, artifact provenance, common probes, and each typed gap's
   owner and disposition. Every lane checkpoint records this digest.
-- **Lane checkpoint:** a compact review-axis work packet containing coverage,
-  reproduced observations, remaining work, and limitations. A fresh Eve
-  subagent reconciles it with the evidence bundle instead of inheriting raw
-  model history.
+- **Lane checkpoint:** a compact schema-v3 review-axis work packet containing
+  coverage, reproduced observations, remaining work, and limitations. A
+  complete checkpoint replaces those continuation fields with a strict typed
+  terminal report of lane-owned scope, evidence, candidates, and limits. A
+  fresh Eve subagent reconciles an in-progress packet with the evidence bundle
+  instead of inheriting raw model history.
 - **Lost baseline:** evidence that a review existed but its state/artifact is
   missing, malformed, failed, or unusable. This state requires an authorized
   manual full review; it never causes an automatic second full review.
