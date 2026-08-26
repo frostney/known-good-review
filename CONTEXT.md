@@ -59,9 +59,10 @@ PR-produced artifact contents are untrusted evidence. The only policy file is
 `.github/known-good-review.yml`,
 read at the trusted base SHA. A PR cannot alter the policy that reviews itself.
 Models author review judgments and evidence content, but not report identity,
-prior finding selection, stable IDs, verdict derivation, or publication
-targets. Typed application code owns those fields, exact-head evidence
-provenance, gap routing, and the canonical merge.
+prior finding selection, stable IDs, fresh finding status, skipped-axis
+coverage, verdict derivation, or publication targets. Typed application code
+owns those fields, exact-head evidence provenance, gap routing, and the
+canonical merge.
 
 GitHub is the authoritative review-state store. Convex memory is advisory and
 scoped by immutable GitHub repository ID. It stores only normalized finding,

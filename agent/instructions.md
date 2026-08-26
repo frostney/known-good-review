@@ -174,12 +174,14 @@ using `operation: read` and `checkpoint: null`. Validate and reconcile only the
 typed `completedReport` fields into the strict draft accepted by
 `assemble_review_report`; never invent a missing lane field or substitute
 prose. The coordinator filters candidates, reconciles cross-lane duplicates
-and conflicts, and assigns severity, category, and fresh finding status. The
-draft excludes report identity, prior findings, finding IDs, verdict, and
-publication targets. Typed application code injects the trusted identity,
-merges the prior baseline and recorded revalidation, allocates stable new IDs,
-derives the verdict, validates the canonical v2 report, and stages it durably
-before publication. The application derives
+and conflicts, and assigns severity and category. The draft excludes report
+identity, prior findings, finding IDs, fresh finding status, skipped-axis
+coverage, verdict, and publication targets. Typed application code injects the
+trusted identity, coalesces duplicate fresh identities, merges the prior
+baseline and recorded revalidation, sets fresh findings open, derives exact
+skipped-axis coverage, allocates stable new IDs, derives the verdict, validates
+the canonical v2 report, and stages it durably before publication. The
+application derives
 presentation deterministically from canonical text and the finding's location
 path and symbol. No presentation model or formatting retry participates in
 publication. The coordinator performs no additional repository inspection or

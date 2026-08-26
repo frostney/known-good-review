@@ -1,7 +1,10 @@
 import { z } from "zod";
 import type { ReviewAxis } from "./axes";
 import { reviewAxes } from "./axes";
-import { reviewFindingObjectSchema } from "./findings";
+import {
+  findingChurnSchema,
+  reviewFindingEvidenceSchema,
+} from "./findings";
 
 const revisionSchema = z.string().regex(/^[a-f0-9]{40}$/);
 const fingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -12,9 +15,9 @@ const observationSchema = z.object({
 });
 
 const boundedReportText = z.string().min(1).max(2_000);
-const laneReportCandidateSchema = reviewFindingObjectSchema
-  .omit({ id: true, severity: true, category: true, status: true })
+const laneReportCandidateSchema = reviewFindingEvidenceSchema
   .extend({
+    churn: findingChurnSchema.nullable(),
     uncertainty: z.array(boundedReportText).max(12),
   })
   .strict();

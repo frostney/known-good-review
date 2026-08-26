@@ -12,6 +12,7 @@ import {
   beginReportAssembly,
   recordRevalidationResults,
   reportAssemblyFailure,
+  reviewReportDraftSchema,
   ReviewReportValidationError,
 } from "../src/review/report-assembly";
 
@@ -101,7 +102,7 @@ function draft() {
       claim: "Review the exact 709983d delta and revalidate CR-6 and CR-7",
       dirtyState: "clean",
     },
-    coverage: { skippedAxes: [], staticOnly: [], unreached: [] },
+    coverage: { staticOnly: [], unreached: [] },
     churn: { window: "90 days", symbolCoverage: [], fileFallbacks: [] },
     probes: [
       {
@@ -180,11 +181,11 @@ describe("application-owned review report assembly", () => {
         .filter(({ id }) => id === "CR-6" || id === "CR-7")
         .map((item) => ({ ...item, status: "fixed" as const })),
     );
-    const { id: _firstId, ...first } = finding(
+    const { id: _firstId, status: _firstStatus, ...first } = finding(
       "CR-8",
       "Alpha correction",
     );
-    const { id: _secondId, ...second } = finding(
+    const { id: _secondId, status: _secondStatus, ...second } = finding(
       "CR-9",
       "Beta correction",
     );
@@ -201,6 +202,167 @@ describe("application-owned review report assembly", () => {
       { id: "CR-8", title: "Alpha correction" },
       { id: "CR-9", title: "Beta correction" },
     ]);
+  });
+
+  test("contains every accepted category and churn draft in canonical assembly", () => {
+    const categories = [
+      "CLAIM",
+      "QUALITY",
+      "ARCHITECTURE_RISK",
+      "DISCOVERABILITY",
+    ] as const;
+    const churn = {
+      granularity: "file" as const,
+      window: "90 days",
+      touches: 1,
+      linesAdded: 2,
+      linesDeleted: 3,
+      coSignals: [],
+    };
+    const canonicalCategories: string[] = [];
+
+    for (const category of categories) {
+      for (const candidateChurn of [null, churn] as const) {
+        const candidate = {
+          severity: "IMPROVEMENT" as const,
+          category,
+          title: `${category} candidate`,
+          location: { path: "src/review.ts", line: 1, symbol: null },
+          evidence: ["The exact evidence supports the candidate."],
+          impact: "The report could be incomplete.",
+          remedy: "Keep the contract structurally aligned.",
+          staticOnly: false,
+          churn: candidateChurn,
+        };
+        const candidateDraft = {
+          ...draft(),
+          freshFindings: [candidate],
+        };
+        const parsed = reviewReportDraftSchema.safeParse(candidateDraft);
+        const shouldAccept =
+          category === "ARCHITECTURE_RISK"
+            ? candidateChurn !== null
+            : candidateChurn === null;
+
+        expect(parsed.success).toBe(shouldAccept);
+        if (!parsed.success) continue;
+        const assembled = assembleCanonicalReviewReport({
+          draft: parsed.data,
+          generatedAt: "2026-08-23T01:02:00.000Z",
+          priorReport: baselineReport(),
+          state: recordRevalidationResults(
+            assemblyState(),
+            baselineReport().findings
+              .filter(({ id }) => id === "CR-6" || id === "CR-7")
+              .map((item) => ({ ...item, status: "fixed" as const })),
+          ),
+        });
+        canonicalCategories.push(assembled.report!.findings.at(-1)!.category);
+      }
+    }
+
+    expect(canonicalCategories).toEqual([
+      "CLAIM",
+      "QUALITY",
+      "ARCHITECTURE_RISK",
+      "DISCOVERABILITY",
+    ]);
+  });
+
+  test("rejects unsafe paths at the model-facing boundary", () => {
+    const { id: _id, status: _status, ...candidate } = finding(
+      "CR-8",
+      "Repository-relative location",
+    );
+
+    for (const path of ["/tmp/x", "../x", "a\\b", "a/../b"]) {
+      expect(
+        reviewReportDraftSchema.safeParse({
+          ...draft(),
+          freshFindings: [
+            { ...candidate, location: { ...candidate.location, path } },
+          ],
+        }).success,
+      ).toBeFalse();
+    }
+  });
+
+  test("owns fresh status and skipped axes in application code", () => {
+    const { id: _id, status: _status, ...candidate } = finding(
+      "CR-8",
+      "Application-owned fields",
+    );
+    const state = beginReportAssembly({
+      executionRevision: "review-report-v1",
+      repositoryId: "R_pascal_mcp_sdk",
+      pullRequest: 63,
+      baseSha,
+      headSha: failedHead,
+      patchFingerprint,
+      planKind: "full",
+      activeAxes: [
+        "deduplication",
+        "claim-and-specification",
+        "engineering-quality",
+      ],
+      selectedFindingIds: [],
+    });
+    const assembled = assembleCanonicalReviewReport({
+      draft: { ...draft(), freshFindings: [candidate] },
+      generatedAt: "2026-08-23T01:02:00.000Z",
+      priorReport: null,
+      state,
+    });
+
+    expect(assembled.report?.findings).toMatchObject([
+      { id: "CR-1", status: "open" },
+    ]);
+    expect(assembled.report?.coverage.skippedAxes).toEqual([
+      {
+        name: "discoverability",
+        reason: "No public web surface matched trusted review configuration.",
+      },
+    ]);
+  });
+
+  test("coalesces duplicate fresh identities deterministically", () => {
+    const { id: _id, status: _status, ...candidate } = finding(
+      "CR-8",
+      "Shared candidate",
+    );
+    const duplicate = {
+      ...candidate,
+      location: { ...candidate.location, line: candidate.location.line + 1 },
+      evidence: ["A second axis reproduced the same defect."],
+      staticOnly: true,
+    };
+    const prior = baselineReport();
+    const completed = recordRevalidationResults(
+      assemblyState(),
+      prior.findings
+        .filter(({ id }) => id === "CR-6" || id === "CR-7")
+        .map((item) => ({ ...item, status: "fixed" as const })),
+    );
+    const assemble = (freshFindings: readonly [typeof candidate, typeof duplicate]) =>
+      assembleCanonicalReviewReport({
+        draft: { ...draft(), freshFindings },
+        generatedAt: "2026-08-23T01:02:00.000Z",
+        priorReport: prior,
+        state: completed,
+      }).report!.findings.at(-1)!;
+
+    expect(assemble([candidate, duplicate])).toEqual(
+      assemble([duplicate, candidate]),
+    );
+    expect(assemble([candidate, duplicate])).toMatchObject({
+      id: "CR-8",
+      status: "open",
+      evidence: [
+        "A second axis reproduced the same defect.",
+        "The exact production replay retained this finding.",
+      ],
+      staticOnly: false,
+    });
   });
 
   test("keeps the last known-good baseline while a validated head awaits publication", () => {
