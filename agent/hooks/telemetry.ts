@@ -13,11 +13,14 @@ import {
   trustedGitHubContext,
 } from "../../src/github/trusted-context";
 import { memoryPolicyHash } from "../../src/memory/policy";
-import {
-  parseSubagentRoute,
-  type ReviewRoute,
-} from "../../src/models/routing";
+import { parseSubagentRoute, type ReviewRoute } from "../../src/models/routing";
 import { shadowInputExceedances } from "../../src/telemetry/budget-policy";
+import {
+  gatewayTelemetryIdentity,
+  reconcileGatewayTelemetry,
+  type PendingGatewayTelemetry,
+  type ReconciledGatewayTelemetry,
+} from "../../src/telemetry/gateway-reconciliation";
 import { ownsReviewLifecycle } from "../../src/review/execution-session";
 import { readLaneCheckpoint } from "../../src/review/lane-checkpoint";
 import {
@@ -38,6 +41,10 @@ import {
   reviewReportState,
 } from "../lib/review-report";
 import { currentLaneCheckpointIdentity } from "../lib/review-evidence";
+import {
+  enqueueGatewayTelemetry,
+  pendingGatewayTelemetry,
+} from "../lib/gateway-telemetry";
 import { beginReportAssembly } from "../../src/review/report-assembly";
 import { z } from "zod";
 
@@ -58,11 +65,7 @@ const sessionLimitDetailsSchema = z.object({
   usedTokens: z.number().int().nonnegative(),
 });
 
-function stepKey(
-  session: string,
-  turnId: string,
-  stepIndex: number,
-): string {
+function stepKey(session: string, turnId: string, stepIndex: number): string {
   return `${session}:${turnId}:${stepIndex}`;
 }
 
@@ -87,9 +90,7 @@ function executionRoute(
   if (channelKind !== "subagent") {
     return { role: "coordinator", attempt: 0 };
   }
-  return (
-    sessionRoutes.get(sessionId) ?? { role: "coordinator", attempt: 0 }
-  );
+  return sessionRoutes.get(sessionId) ?? { role: "coordinator", attempt: 0 };
 }
 
 function reviewAxis(route: ReviewRoute): string {
@@ -102,6 +103,85 @@ function reviewPhase(route: ReviewRoute): string {
   if (route.role === "revalidation") return "revalidation";
   if (route.role === "scout") return "axis-investigation";
   return "coordination";
+}
+
+function logCompletedModel(
+  observation: PendingGatewayTelemetry,
+  generation: ReconciledGatewayTelemetry | null,
+): void {
+  console.info(
+    JSON.stringify({
+      event: "known-good-review.model.completed",
+      telemetryId: gatewayTelemetryIdentity(observation),
+      sessionId: observation.sessionId,
+      turnId: observation.turnId,
+      stepIndex: observation.stepIndex,
+      reviewKind: observation.reviewKind,
+      phase: observation.phase,
+      reviewAxis: observation.reviewAxis,
+      attempt: observation.attempt,
+      memoryPolicyHash: observation.memoryPolicyHash,
+      requestedModel: observation.requestedModel,
+      actualModel: generation?.actualModel ?? observation.requestedModel,
+      fallbackUsed:
+        generation !== null &&
+        generation.actualModel !== observation.requestedModel,
+      provider: generation?.provider ?? null,
+      generationId: observation.generationId || null,
+      inputTokens: generation?.inputTokens ?? observation.inputTokens,
+      outputTokens: generation?.outputTokens ?? observation.outputTokens,
+      cacheReadTokens:
+        generation?.cacheReadTokens ?? observation.cacheReadTokens,
+      cacheWriteTokens:
+        generation?.cacheWriteTokens ?? observation.cacheWriteTokens,
+      costUsd: generation?.costUsd ?? observation.costUsd,
+      durationMs: generation?.durationMs ?? null,
+      latencyMs: generation?.latencyMs ?? null,
+      outcome: "succeeded",
+    }),
+  );
+}
+
+async function reconcilePendingGatewayTelemetry(
+  boundary: string,
+): Promise<void> {
+  try {
+    const current = pendingGatewayTelemetry.get();
+    if (current.length === 0) return;
+    const selectedIds = new Set(current.map(gatewayTelemetryIdentity));
+    const reconciliation = await reconcileGatewayTelemetry({
+      pending: current,
+      getGenerationInfo: (generationId) =>
+        gateway.getGenerationInfo({ id: generationId }),
+    });
+    for (const generation of reconciliation.resolved) {
+      logCompletedModel(generation, generation);
+    }
+    for (const diagnostic of reconciliation.diagnostics) {
+      console.warn(
+        JSON.stringify({
+          event: "known-good-review.telemetry.reconciliation_pending",
+          boundary,
+          ...diagnostic,
+        }),
+      );
+    }
+    pendingGatewayTelemetry.update((latest) => [
+      ...latest.filter(
+        (observation) =>
+          !selectedIds.has(gatewayTelemetryIdentity(observation)),
+      ),
+      ...reconciliation.pending,
+    ]);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "known-good-review.telemetry.reconciliation_failed",
+        boundary,
+        error: error instanceof Error ? error.name : "unknown",
+      }),
+    );
+  }
 }
 
 function symbolicErrorClass(value: string): string {
@@ -257,7 +337,9 @@ function logTurnUsage(sessionId: string, turnId: string): void {
   );
 }
 
-function reviewKind(attributes: Readonly<Record<string, string | readonly string[]>>) {
+function reviewKind(
+  attributes: Readonly<Record<string, string | readonly string[]>>,
+) {
   const raw = attributes[reviewContextAttributes.plan];
   if (typeof raw !== "string") return "unknown";
   try {
@@ -313,9 +395,7 @@ export default defineHook({
       try {
         sessionRoutes.set(
           ctx.session.id,
-          parseSubagentRoute([
-            { role: "user", content: event.data.message },
-          ]),
+          parseSubagentRoute([{ role: "user", content: event.data.message }]),
         );
       } catch {
         sessionRoutes.delete(ctx.session.id);
@@ -341,7 +421,7 @@ export default defineHook({
         },
       );
     },
-    async "step.completed"(event, ctx) {
+    "step.completed"(event, ctx) {
       const key = stepKey(
         ctx.session.id,
         event.data.turnId,
@@ -353,64 +433,38 @@ export default defineHook({
         step?.route ?? executionRoute(ctx.channel.kind, ctx.session.id);
       stepRoutes.delete(key);
       const generationId = event.data.providerMetadata?.gateway.generationId;
-      let generation:
-        | Awaited<ReturnType<typeof gateway.getGenerationInfo>>
-        | undefined;
-      if (generationId) {
-        try {
-          generation = await gateway.getGenerationInfo({ id: generationId });
-        } catch (error) {
-          console.warn(
-            JSON.stringify({
-              event: "known-good-review.telemetry.lookup_failed",
-              generationId,
-              error: error instanceof Error ? error.name : "unknown",
-            }),
-          );
-        }
-      }
       const attributes = ctx.session.auth.current?.attributes ?? {};
-      const inputTokens =
-        generation?.promptTokens ?? event.data.usage?.inputTokens ?? 0;
-      const outputTokens =
-        generation?.completionTokens ?? event.data.usage?.outputTokens ?? 0;
+      const inputTokens = event.data.usage?.inputTokens ?? 0;
+      const outputTokens = event.data.usage?.outputTokens ?? 0;
       recordTurnUsage(
         ctx.session.id,
         event.data.turnId,
         inputTokens,
         outputTokens,
       );
-      console.info(
-        JSON.stringify({
-          event: "known-good-review.model.completed",
-          sessionId: ctx.session.id,
-          turnId: event.data.turnId,
-          stepIndex: event.data.stepIndex,
-          reviewKind: reviewKind(attributes),
-          phase: reviewPhase(route),
-          reviewAxis: reviewAxis(route),
-          attempt: route.attempt,
-          memoryPolicyHash: memoryPolicyHash(),
-          requestedModel,
-          actualModel: generation?.model ?? requestedModel,
-          fallbackUsed:
-            generation !== undefined && generation.model !== requestedModel,
-          provider: generation?.providerName ?? null,
-          generationId: generationId ?? null,
-          inputTokens,
-          outputTokens,
-          cacheReadTokens:
-            generation?.cachedTokens ?? event.data.usage?.cacheReadTokens ?? 0,
-          cacheWriteTokens:
-            generation?.cacheCreationTokens ??
-            event.data.usage?.cacheWriteTokens ??
-            0,
-          costUsd: generation?.totalCost ?? event.data.usage?.costUsd ?? 0,
-          durationMs: generation?.generationTime ?? null,
-          latencyMs: generation?.latency ?? null,
-          outcome: "succeeded",
-        }),
-      );
+      const observation: PendingGatewayTelemetry = {
+        eventId: event.meta.id,
+        sessionId: ctx.session.id,
+        turnId: event.data.turnId,
+        stepIndex: event.data.stepIndex,
+        generationId: generationId ?? "",
+        reviewKind: reviewKind(attributes),
+        phase: reviewPhase(route),
+        reviewAxis: reviewAxis(route),
+        attempt: route.attempt,
+        memoryPolicyHash: memoryPolicyHash(),
+        requestedModel,
+        inputTokens,
+        outputTokens,
+        cacheReadTokens: event.data.usage?.cacheReadTokens ?? 0,
+        cacheWriteTokens: event.data.usage?.cacheWriteTokens ?? 0,
+        costUsd: event.data.usage?.costUsd ?? 0,
+      };
+      if (generationId) {
+        enqueueGatewayTelemetry(observation);
+      } else {
+        logCompletedModel(observation, null);
+      }
     },
     "step.failed"(event, ctx) {
       const key = stepKey(
@@ -483,9 +537,10 @@ export default defineHook({
           } else {
             await publishFailClosedCheck({
               context: trusted,
-              message: failure && recoveryAvailable
-                ? failureSummary(failure)
-                : `Review execution failed closed (${symbolicErrorClass(event.data.code)}). Recovery state is unavailable; continuation is disabled.`,
+              message:
+                failure && recoveryAvailable
+                  ? failureSummary(failure)
+                  : `Review execution failed closed (${symbolicErrorClass(event.data.code)}). Recovery state is unavailable; continuation is disabled.`,
               octokit: adapter.octokit,
             });
           }
@@ -538,9 +593,10 @@ export default defineHook({
           );
           await publishFailClosedCheck({
             context: trusted,
-            message: failure && recoveryAvailable
-              ? failureSummary(failure)
-              : "Review execution completed without publishing a validated v2 findings artifact. Recovery state is unavailable; continuation is disabled.",
+            message:
+              failure && recoveryAvailable
+                ? failureSummary(failure)
+                : "Review execution completed without publishing a validated v2 findings artifact. Recovery state is unavailable; continuation is disabled.",
             octokit: adapter.octokit,
           });
         } catch (error) {
@@ -578,6 +634,15 @@ export default defineHook({
           }),
         );
       }
+    },
+    async "session.waiting"() {
+      await reconcilePendingGatewayTelemetry("session.waiting");
+    },
+    async "session.completed"() {
+      await reconcilePendingGatewayTelemetry("session.completed");
+    },
+    async "session.failed"() {
+      await reconcilePendingGatewayTelemetry("session.failed");
     },
   },
 });
