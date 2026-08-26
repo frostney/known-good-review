@@ -108,8 +108,9 @@ evidence, the coordinator starts a fresh routed scout and passes its compact
 evidence to the next fresh lane. Selected-finding outcomes are persisted before
 report assembly. After all typed axis reports pass application validation, the
 coordinator filters candidates, reconciles duplicates and conflicts, and
-assigns severity, category, and fresh status through the strict assembly
-contract. Typed application code then merges prior and fresh findings,
+assigns severity and category through the strict assembly contract. Typed
+application code then coalesces duplicate fresh identities, merges prior and
+fresh findings, sets fresh findings open, derives skipped-axis coverage,
 preserves stable prior IDs, assigns new IDs, injects trusted review identity,
 derives the verdict, validates the v2 report, and stages it beside the
 unchanged baseline. The app then derives exact-copy

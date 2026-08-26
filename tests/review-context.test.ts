@@ -152,21 +152,37 @@ describe("review evidence bundle", () => {
       "properties.draft.additionalProperties",
       false,
     );
-    expect(reportAssemblyToolSchema).toHaveProperty(
-      "properties.draft.properties.freshFindings.items.required",
-      [
-        "severity",
-        "category",
-        "title",
-        "location",
-        "evidence",
-        "impact",
-        "remedy",
-        "status",
-        "staticOnly",
-        "churn",
-      ],
+    expect(reportAssemblyToolSchema).not.toHaveProperty(
+      "properties.draft.properties.freshFindings.items.properties.status",
     );
+    expect(reportAssemblyToolSchema).not.toHaveProperty(
+      "properties.draft.properties.coverage.properties.skippedAxes",
+    );
+    expect(reportAssemblyToolSchema).toHaveProperty(
+      "properties.draft.properties.freshFindings.items.oneOf",
+    );
+    expect(reportAssemblyToolSchema).toHaveProperty(
+      "properties.draft.properties.freshFindings.items.oneOf.0.properties.category.const",
+      "CLAIM",
+    );
+    expect(reportAssemblyToolSchema).toHaveProperty(
+      "properties.draft.properties.freshFindings.items.oneOf.0.properties.churn.type",
+      "null",
+    );
+    expect(reportAssemblyToolSchema).toHaveProperty(
+      "properties.draft.properties.freshFindings.items.oneOf.2.properties.category.const",
+      "ARCHITECTURE_RISK",
+    );
+    expect(reportAssemblyToolSchema).toHaveProperty(
+      "properties.draft.properties.freshFindings.items.oneOf.2.properties.churn.type",
+      "object",
+    );
+    expect(reportAssemblyToolSchema).toHaveProperty(
+      "properties.draft.properties.freshFindings.items.oneOf.0.properties.location.properties.path.pattern",
+    );
+    expect(
+      JSON.stringify(reportAssemblyToolSchema),
+    ).not.toContain('"status"');
     expect(
       assembleReviewReportInputSchema.safeParse({
         draft: { freshFindings: [] },

@@ -2,9 +2,10 @@ import { z } from "zod";
 import { reviewAxes } from "./axes";
 import { findingIdentity } from "./finding-identity";
 import {
+  reviewFindingDraftSchema,
   reviewFindingSchema,
-  reviewFindingObjectSchema,
   reviewReportSchema,
+  type ReviewFindingDraft,
   type ReviewFinding,
   type ReviewReport,
 } from "./findings";
@@ -62,8 +63,6 @@ export type ReportAssemblyIdentity = z.infer<
   typeof reportAssemblyIdentitySchema
 >;
 
-const reviewFindingDraftSchema = reviewFindingObjectSchema.omit({ id: true });
-
 export const reviewReportDraftSchema = z
   .object({
     scope: z.object({
@@ -71,9 +70,6 @@ export const reviewReportDraftSchema = z
       dirtyState: z.string(),
     }),
     coverage: z.object({
-      skippedAxes: z.array(
-        z.object({ name: z.string(), reason: z.string().min(1) }),
-      ),
       staticOnly: z.array(z.string()),
       unreached: z.array(z.string()),
     }),
@@ -223,23 +219,70 @@ function compareText(left: string, right: string): number {
 }
 
 function findingDraftIdentity(
-  finding: z.infer<typeof reviewFindingDraftSchema>,
+  finding: ReviewFindingDraft,
 ): string {
   return findingIdentity(finding);
 }
 
+function compareFreshFindings(
+  left: ReviewFindingDraft,
+  right: ReviewFindingDraft,
+): number {
+  return (
+    severityOrder[left.severity] - severityOrder[right.severity] ||
+    compareText(left.category, right.category) ||
+    compareText(left.location.path, right.location.path) ||
+    left.location.line - right.location.line ||
+    compareText(left.title, right.title) ||
+    compareText(JSON.stringify(left), JSON.stringify(right))
+  );
+}
+
 function sortedFreshFindings(
-  findings: readonly z.infer<typeof reviewFindingDraftSchema>[],
-): readonly z.infer<typeof reviewFindingDraftSchema>[] {
-  return [...findings].sort((left, right) => {
-    return (
-      severityOrder[left.severity] - severityOrder[right.severity] ||
-      compareText(left.category, right.category) ||
-      compareText(left.location.path, right.location.path) ||
-      left.location.line - right.location.line ||
-      compareText(left.title, right.title)
-    );
-  });
+  findings: readonly ReviewFindingDraft[],
+): readonly ReviewFindingDraft[] {
+  return [...findings].sort(compareFreshFindings);
+}
+
+function coalesceFreshFindings(
+  findings: readonly ReviewFindingDraft[],
+  knownIdentities: ReadonlySet<string>,
+): readonly ReviewFindingDraft[] {
+  const coalesced = new Map<string, ReviewFindingDraft>();
+  for (const finding of sortedFreshFindings(findings)) {
+    const identity = findingDraftIdentity(finding);
+    if (knownIdentities.has(identity)) continue;
+    const existing = coalesced.get(identity);
+    if (!existing) {
+      coalesced.set(identity, finding);
+      continue;
+    }
+    coalesced.set(identity, {
+      ...existing,
+      evidence: [...new Set([...existing.evidence, ...finding.evidence])].sort(
+        compareText,
+      ),
+      staticOnly: existing.staticOnly && finding.staticOnly,
+    });
+  }
+  return [...coalesced.values()];
+}
+
+const skippedAxisReasons = {
+  deduplication: "Axis not activated by the trusted review plan.",
+  "claim-and-specification": "Axis not activated by the trusted review plan.",
+  "engineering-quality": "Axis not activated by the trusted review plan.",
+  discoverability:
+    "No public web surface matched trusted review configuration.",
+} satisfies Readonly<Record<(typeof reviewAxes)[number], string>>;
+
+function skippedReviewAxes(
+  activeAxes: readonly (typeof reviewAxes)[number][],
+): readonly { readonly name: string; readonly reason: string }[] {
+  const active = new Set(activeAxes);
+  return reviewAxes
+    .filter((axis) => !active.has(axis))
+    .map((name) => ({ name, reason: skippedAxisReasons[name] }));
 }
 
 function reportVerdict(
@@ -313,40 +356,12 @@ export function assembleCanonicalReviewReport(input: {
   if (!draft.success) {
     throw new ReviewReportValidationError(diagnosticsFrom(draft.error));
   }
-  const skippedNames = new Set(
-    draft.data.coverage.skippedAxes.map((axis) => axis.name),
-  );
-  if (
-    draft.data.coverage.skippedAxes.some((axis) =>
-      state.identity.activeAxes.includes(
-        axis.name as (typeof reviewAxes)[number],
-      ),
-    ) ||
-    reviewAxes.some(
-      (axis) =>
-        !state.identity.activeAxes.includes(axis) && !skippedNames.has(axis),
-    )
-  ) {
-    throw new ReviewReportValidationError([
-      { code: "custom", path: ["coverage", "skippedAxes"] },
-    ]);
-  }
 
   const preserved = priorFindings(state, input.priorReport);
   const knownIdentities = new Set(preserved.map(findingIdentity));
-  const freshIdentities = new Set<string>();
-  const fresh = sortedFreshFindings(draft.data.freshFindings).filter(
-    (finding) => {
-      const identity = findingDraftIdentity(finding);
-      if (knownIdentities.has(identity)) return false;
-      if (freshIdentities.has(identity)) {
-        throw new ReviewReportValidationError([
-          { code: "custom", path: ["freshFindings"] },
-        ]);
-      }
-      freshIdentities.add(identity);
-      return true;
-    },
+  const fresh = coalesceFreshFindings(
+    draft.data.freshFindings,
+    knownIdentities,
   );
   const highestPriorId = preserved.reduce((highest, finding) => {
     return Math.max(highest, Number(finding.id.slice(3)));
@@ -356,6 +371,7 @@ export function assembleCanonicalReviewReport(input: {
     ...fresh.map((finding, index) => ({
       ...finding,
       id: `CR-${highestPriorId + index + 1}`,
+      status: "open" as const,
     })),
   ].sort((left, right) => Number(left.id.slice(3)) - Number(right.id.slice(3)));
 
@@ -372,6 +388,7 @@ export function assembleCanonicalReviewReport(input: {
     },
     coverage: {
       activeAxes: state.identity.activeAxes,
+      skippedAxes: skippedReviewAxes(state.identity.activeAxes),
       ...draft.data.coverage,
     },
     churn: draft.data.churn,

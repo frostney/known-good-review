@@ -1,57 +1,93 @@
 import { z } from "zod";
 import { reviewAxes } from "./axes";
 
-const findingLocationSchema = z.object({
-  path: z.string().min(1),
-  line: z.number().int().positive(),
-  symbol: z.string().nullable(),
-});
+export const repositoryRelativePathSchema = z
+  .string()
+  .min(1)
+  .regex(/^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.\.(?:\/|$)).+$/);
 
-const churnSchema = z.object({
-  granularity: z.enum(["symbol", "file"]),
-  window: z.string(),
-  touches: z.number().int().nonnegative(),
-  linesAdded: z.number().int().nonnegative(),
-  linesDeleted: z.number().int().nonnegative(),
-  coSignals: z.array(z.string()),
-});
+export const findingLocationSchema = z
+  .object({
+    path: repositoryRelativePathSchema,
+    line: z.number().int().positive(),
+    symbol: z.string().nullable(),
+  })
+  .strict();
 
-export const reviewFindingObjectSchema = z.object({
-  id: z.string().regex(/^CR-[1-9]\d*$/),
+export const findingChurnSchema = z
+  .object({
+    granularity: z.enum(["symbol", "file"]),
+    window: z.string(),
+    touches: z.number().int().nonnegative(),
+    linesAdded: z.number().int().nonnegative(),
+    linesDeleted: z.number().int().nonnegative(),
+    coSignals: z.array(z.string()),
+  })
+  .strict();
+
+export const reviewFindingEvidenceSchema = z
+  .object({
+    title: z.string().min(1),
+    location: findingLocationSchema,
+    evidence: z.array(z.string().min(1)).min(1),
+    impact: z.string().min(1),
+    remedy: z.string().min(1),
+    staticOnly: z.boolean(),
+  })
+  .strict();
+
+const findingDraftBaseShape = {
   severity: z.enum(["BLOCKING", "IMPORTANT", "IMPROVEMENT", "NITPICK"]),
-  category: z.enum([
-    "CLAIM",
-    "QUALITY",
-    "ARCHITECTURE_RISK",
-    "DISCOVERABILITY",
-  ]),
-  title: z.string().min(1),
-  location: findingLocationSchema,
-  evidence: z.array(z.string().min(1)).min(1),
-  impact: z.string().min(1),
-  remedy: z.string().min(1),
-  status: z.enum(["open", "fixed", "deferred"]),
-  staticOnly: z.boolean(),
-  churn: churnSchema.nullable(),
-});
+  ...reviewFindingEvidenceSchema.shape,
+};
 
-export const reviewFindingSchema = reviewFindingObjectSchema
-  .superRefine((finding, ctx) => {
-    if (finding.category === "ARCHITECTURE_RISK" && finding.churn === null) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["churn"],
-        message: "ARCHITECTURE_RISK findings require churn evidence",
-      });
-    }
-    if (finding.category !== "ARCHITECTURE_RISK" && finding.churn !== null) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["churn"],
-        message: "Only ARCHITECTURE_RISK findings may contain churn evidence",
-      });
-    }
-  });
+const claimFindingDraftSchema = z
+  .object({
+    ...findingDraftBaseShape,
+    category: z.literal("CLAIM"),
+    churn: z.null(),
+  })
+  .strict();
+const qualityFindingDraftSchema = z
+  .object({
+    ...findingDraftBaseShape,
+    category: z.literal("QUALITY"),
+    churn: z.null(),
+  })
+  .strict();
+const architectureRiskFindingDraftSchema = z
+  .object({
+    ...findingDraftBaseShape,
+    category: z.literal("ARCHITECTURE_RISK"),
+    churn: findingChurnSchema,
+  })
+  .strict();
+const discoverabilityFindingDraftSchema = z
+  .object({
+    ...findingDraftBaseShape,
+    category: z.literal("DISCOVERABILITY"),
+    churn: z.null(),
+  })
+  .strict();
+
+export const reviewFindingDraftSchema = z.discriminatedUnion("category", [
+  claimFindingDraftSchema,
+  qualityFindingDraftSchema,
+  architectureRiskFindingDraftSchema,
+  discoverabilityFindingDraftSchema,
+]);
+
+const canonicalFindingShape = {
+  id: z.string().regex(/^CR-[1-9]\d*$/),
+  status: z.enum(["open", "fixed", "deferred"]),
+};
+
+export const reviewFindingSchema = z.discriminatedUnion("category", [
+  claimFindingDraftSchema.extend(canonicalFindingShape),
+  qualityFindingDraftSchema.extend(canonicalFindingShape),
+  architectureRiskFindingDraftSchema.extend(canonicalFindingShape),
+  discoverabilityFindingDraftSchema.extend(canonicalFindingShape),
+]);
 
 export const reviewReportSchema = z
   .object({
@@ -98,21 +134,8 @@ export const reviewReportSchema = z
         message: "Finding IDs must be unique",
       });
     }
-    report.findings.forEach((finding, index) => {
-      const path = finding.location.path;
-      if (
-        path.startsWith("/") ||
-        path.includes("\\") ||
-        path.split("/").includes("..")
-      ) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["findings", index, "location", "path"],
-          message: "Finding paths must be repository-relative",
-        });
-      }
-    });
   });
 
+export type ReviewFindingDraft = z.infer<typeof reviewFindingDraftSchema>;
 export type ReviewFinding = z.infer<typeof reviewFindingSchema>;
 export type ReviewReport = z.infer<typeof reviewReportSchema>;
