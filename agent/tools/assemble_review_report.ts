@@ -10,6 +10,7 @@ import { readLaneCheckpoint } from "../../src/review/lane-checkpoint";
 import {
   assembleCanonicalReviewReport,
   reportAssemblyFailure,
+  reviewReportDraftSchema,
 } from "../../src/review/report-assembly";
 import { advanceReviewRecovery } from "../../src/review/recovery";
 import {
@@ -24,7 +25,7 @@ import { currentLaneCheckpointIdentity } from "../lib/review-evidence";
 
 export const assembleReviewReportInputSchema = z
   .object({
-    draft: z.unknown(),
+    draft: reviewReportDraftSchema,
   })
   .strict();
 

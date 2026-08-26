@@ -48,7 +48,7 @@ export const reviewLaneCheckpointInputSchema = z
 
 export default defineTool({
   description:
-    "Read or replace the compact checkpoint for one exact review axis. The application binds each checkpoint to the immutable evidence-ledger digest. A fresh lane continuation reads this first and reconciles it with the exact manifest. Write one checkpoint before returning complete or requesting a fresh continuation. Checkpoints preserve coverage, evidence-backed observations, remaining work, and limitations without preserving raw tool history.",
+    "Read or replace the compact schema-v3 checkpoint for one exact review axis. The application binds each checkpoint to the immutable evidence-ledger digest. A fresh lane continuation reads this first and reconciles it with the exact manifest. Write one checkpoint before returning complete or requesting a fresh continuation. Complete checkpoints preserve a strict typed terminal report; in-progress checkpoints preserve coverage, evidence-backed observations, remaining work, and limitations without raw tool history.",
   inputSchema: reviewLaneCheckpointInputSchema,
   async execute(input, ctx) {
     const trusted = trustedGitHubContext(ctx.session.auth.current);

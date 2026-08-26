@@ -22,12 +22,15 @@ import {
   type ReviewEvidenceManifest,
 } from "../src/review/evidence-bundle";
 import {
+  laneCompletedReportSchema,
   laneCheckpointContentSchema,
+  laneCheckpointPath,
   readLaneCheckpoint,
   validateLaneCheckpointCoverage,
   validateLaneCheckpointEvidenceProgress,
   writeLaneCheckpoint,
 } from "../src/review/lane-checkpoint";
+import { reviewReportDraftSchema } from "../src/review/report-assembly";
 import {
   coordinatorReviewSteps,
   coordinatorReviewWindowClosed,
@@ -41,6 +44,29 @@ const identity = {
   patchFingerprint: "3".repeat(64),
   evidenceDigest: "4".repeat(64),
 };
+
+function completedLaneReport(
+  axis:
+    | "deduplication"
+    | "claim-and-specification"
+    | "engineering-quality"
+    | "discoverability",
+) {
+  return {
+    axis,
+    scope: {
+      claim: "Review the complete immutable evidence packet.",
+      dirtyState: "clean",
+      inspectedSupportingContext: ["src/review.ts"],
+    },
+    coverage: { staticOnly: [], unreached: [] },
+    churn: { window: "90 days", symbolCoverage: [], fileFallbacks: [] },
+    probes: [{ commandOrAction: "bun test", result: "passed" }],
+    candidates: [],
+    verifiedClaims: ["The review path remains read-only."],
+    limitations: [],
+  };
+}
 
 function memorySandbox() {
   const files = new Map<string, string>();
@@ -76,9 +102,25 @@ describe("review evidence bundle", () => {
       "type",
       "object",
     );
-    expect(z.toJSONSchema(reviewLaneCheckpointInputSchema)).toHaveProperty(
-      "type",
-      "object",
+    const laneCheckpointToolSchema = z.toJSONSchema(
+      reviewLaneCheckpointInputSchema,
+    );
+    expect(laneCheckpointToolSchema).toHaveProperty("type", "object");
+    expect(laneCheckpointToolSchema).toHaveProperty(
+      "properties.checkpoint.anyOf.0.properties.completedReport.anyOf.0.properties.candidates.items.required",
+      [
+        "title",
+        "location",
+        "evidence",
+        "impact",
+        "remedy",
+        "staticOnly",
+        "churn",
+        "uncertainty",
+      ],
+    );
+    expect(laneCheckpointToolSchema).not.toHaveProperty(
+      "properties.checkpoint.anyOf.0.properties.completedReport.anyOf.0.properties.candidates.items.properties.severity",
     );
     expect(
       z.toJSONSchema(reviewLaneCheckpointInputSchema).required,
@@ -98,15 +140,89 @@ describe("review evidence bundle", () => {
     expect(
       publishReviewInputSchema.safeParse({ report: {} }).success,
     ).toBeFalse();
-    expect(z.toJSONSchema(assembleReviewReportInputSchema).required).toEqual([
-      "draft",
-    ]);
+    const reportAssemblyToolSchema = z.toJSONSchema(
+      assembleReviewReportInputSchema,
+    );
+    expect(reportAssemblyToolSchema.required).toEqual(["draft"]);
+    expect(reportAssemblyToolSchema).toHaveProperty(
+      "properties.draft.required",
+      z.toJSONSchema(reviewReportDraftSchema).required,
+    );
+    expect(reportAssemblyToolSchema).toHaveProperty(
+      "properties.draft.additionalProperties",
+      false,
+    );
+    expect(reportAssemblyToolSchema).toHaveProperty(
+      "properties.draft.properties.freshFindings.items.required",
+      [
+        "severity",
+        "category",
+        "title",
+        "location",
+        "evidence",
+        "impact",
+        "remedy",
+        "status",
+        "staticOnly",
+        "churn",
+      ],
+    );
+    expect(
+      assembleReviewReportInputSchema.safeParse({
+        draft: { freshFindings: [] },
+      }).success,
+    ).toBeFalse();
     expect(
       z.toJSONSchema(recordReviewRevalidationInputSchema).required,
     ).toEqual(["findings"]);
     expect(z.toJSONSchema(laneCheckpointContentSchema).required).toContain(
       "completedReport",
     );
+    expect(z.toJSONSchema(laneCompletedReportSchema).required).toEqual([
+      "axis",
+      "scope",
+      "coverage",
+      "churn",
+      "probes",
+      "candidates",
+      "verifiedClaims",
+      "limitations",
+    ]);
+    expect(
+      laneCheckpointContentSchema.safeParse({
+        status: "complete",
+        reviewedEntries: [0],
+        remainingEntries: [],
+        observations: [],
+        nextSteps: [],
+        limitations: [],
+        completedReport: "Complete.",
+      }).success,
+    ).toBeFalse();
+    expect(
+      laneCompletedReportSchema.safeParse({
+        ...completedLaneReport("engineering-quality"),
+        candidates: [
+          {
+            title: "Candidate",
+            location: { path: "src/review.ts", line: 1, symbol: null },
+            evidence: ["src/review.ts:1 shows the mismatch."],
+            impact: "The review can fail after paid lanes complete.",
+            remedy: "Validate the typed lane report before reconciliation.",
+            staticOnly: true,
+            churn: null,
+            uncertainty: [],
+            severity: "IMPORTANT",
+          },
+        ],
+      }).success,
+    ).toBeFalse();
+    expect(
+      laneCompletedReportSchema.safeParse({
+        ...completedLaneReport("engineering-quality"),
+        verifiedClaims: Array.from({ length: 13 }, () => "x".repeat(2_000)),
+      }).success,
+    ).toBeFalse();
     expect(
       readReviewEvidenceInputSchema.safeParse({ operation: "patch" }).success,
     ).toBeFalse();
@@ -431,7 +547,7 @@ describe("review lane checkpoint", () => {
           observations: [],
           nextSteps: [],
           limitations: [],
-          completedReport: "Complete.",
+          completedReport: completedLaneReport("engineering-quality"),
         },
         2,
       ),
@@ -465,7 +581,7 @@ describe("review lane checkpoint", () => {
           observations: [],
           nextSteps: [],
           limitations: [],
-          completedReport: "Complete.",
+          completedReport: completedLaneReport("engineering-quality"),
         },
         {
           completedEntries: [0],
@@ -525,11 +641,11 @@ describe("review lane checkpoint", () => {
         observations: [],
         nextSteps: [],
         limitations: [],
-        completedReport:
-          "Engineering-quality lane completed with no candidates.",
+        completedReport: completedLaneReport("engineering-quality"),
       },
       2,
     );
+    expect(complete.schemaVersion).toBe(3);
     expect(complete.revision).toBe(2);
     await expect(
       writeLaneCheckpoint(
@@ -550,7 +666,55 @@ describe("review lane checkpoint", () => {
     ).rejects.toThrow("cannot be replaced");
   });
 
-  test("accepts a complete maximum-file checkpoint with a bounded report", async () => {
+  test("binds a typed terminal report to its review axis", async () => {
+    const sandbox = memorySandbox();
+    await expect(
+      writeLaneCheckpoint(
+        sandbox.runtime,
+        identity,
+        "engineering-quality",
+        {
+          status: "complete",
+          reviewedEntries: [0],
+          remainingEntries: [],
+          observations: [],
+          nextSteps: [],
+          limitations: [],
+          completedReport: completedLaneReport("deduplication"),
+        },
+        1,
+      ),
+    ).rejects.toThrow("must match its checkpoint axis");
+  });
+
+  test("rejects legacy prose checkpoints after the schema-v3 hard cut", async () => {
+    const sandbox = memorySandbox();
+    sandbox.files.set(
+      laneCheckpointPath(identity.patchFingerprint, "engineering-quality"),
+      `${JSON.stringify({
+        schemaVersion: 2,
+        axis: "engineering-quality",
+        ...identity,
+        revision: 1,
+        status: "complete",
+        reviewedEntries: [0],
+        remainingEntries: [],
+        observations: [],
+        nextSteps: [],
+        limitations: [],
+        completedReport: "Legacy prose report.",
+      })}\n`,
+    );
+    await expect(
+      readLaneCheckpoint(
+        sandbox.runtime,
+        identity,
+        "engineering-quality",
+      ),
+    ).rejects.toThrow();
+  });
+
+  test("accepts a complete maximum-file checkpoint with a bounded typed report", async () => {
     const sandbox = memorySandbox();
     const reviewedEntries = Array.from({ length: 2_000 }, (_, index) => index);
     const checkpoint = await writeLaneCheckpoint(
@@ -564,7 +728,7 @@ describe("review lane checkpoint", () => {
         observations: [],
         nextSteps: [],
         limitations: [],
-        completedReport: "x".repeat(24_000),
+        completedReport: completedLaneReport("deduplication"),
       },
       2_000,
     );
