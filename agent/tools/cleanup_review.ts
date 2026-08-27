@@ -4,7 +4,7 @@ import { z } from "zod";
 export default defineTool({
   description:
     "Remove the closed pull request's inspected workspace and stop its isolated sandbox. Use only for the cleanup operation selected by trusted GitHub lifecycle context.",
-  inputSchema: z.object({}),
+  inputSchema: z.object({}).strict(),
   async execute(_input, ctx) {
     if (ctx.session.parent) {
       throw new Error(

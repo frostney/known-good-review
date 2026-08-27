@@ -13,10 +13,11 @@ import {
   recordRevalidationResults,
   reportAssemblyFailure,
 } from "../../src/review/report-assembly";
+import { reviewFindingSchema } from "../../src/review/findings";
 
 export const recordReviewRevalidationInputSchema = z
   .object({
-    findings: z.unknown(),
+    findings: z.array(reviewFindingSchema).max(100),
   })
   .strict();
 

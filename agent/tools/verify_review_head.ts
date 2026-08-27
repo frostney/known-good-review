@@ -11,7 +11,7 @@ import {
 export default defineTool({
   description:
     "Revalidate that the pull request is still open, reviewable, and at the trusted base/head before inspecting or publishing it. Call this after the initial debounce and immediately before every review.",
-  inputSchema: z.object({}),
+  inputSchema: z.object({}).strict(),
   async execute(_input, ctx) {
     if (ctx.session.parent) {
       throw new Error(
