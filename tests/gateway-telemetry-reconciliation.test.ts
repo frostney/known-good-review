@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { GatewayNotFoundError, GatewayResponseError } from "@ai-sdk/gateway";
+import {
+  createGateway,
+  GatewayNotFoundError,
+  GatewayResponseError,
+} from "@ai-sdk/gateway";
 import {
   enqueuePendingGatewayTelemetry,
   reconcileGatewayTelemetry,
@@ -76,6 +80,56 @@ describe("Gateway telemetry reconciliation", () => {
         latencyMs: 120,
       },
     ]);
+  });
+
+  test("retries the generation endpoint's production 404 response shape", async () => {
+    let attempts = 0;
+    const gateway = createGateway({
+      apiKey: "test-key",
+      baseURL: "https://gateway.test/v4/ai",
+      fetch: Object.assign(
+        async () => {
+          attempts += 1;
+          if (attempts === 1) {
+            return Response.json({}, { status: 404 });
+          }
+          return Response.json({
+            data: {
+              id: "gen_one",
+              total_cost: 0.02,
+              upstream_inference_cost: 0.02,
+              usage: 0.02,
+              created_at: "2026-08-26T12:30:39.000Z",
+              model: "openai/gpt-5.6-sol",
+              is_byok: false,
+              provider_name: "bedrock",
+              streamed: true,
+              finish_reason: "stop",
+              latency: 120,
+              generation_time: 1_110,
+              native_tokens_prompt: 11,
+              native_tokens_completion: 3,
+              native_tokens_reasoning: 0,
+              native_tokens_cached: 5,
+              native_tokens_cache_creation: 2,
+              billable_web_search_calls: 0,
+            },
+          });
+        },
+        { preconnect() {} },
+      ),
+    });
+    const result = await reconcileGatewayTelemetry({
+      pending: [observation],
+      retryDelaysMs: [0, 0],
+      getGenerationInfo: (generationId) =>
+        gateway.getGenerationInfo({ id: generationId }),
+    });
+
+    expect(attempts).toBe(2);
+    expect(result.pending).toEqual([]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.resolved).toHaveLength(1);
   });
 
   test("deduplicates at-least-once hook delivery by stable generation identity", () => {

@@ -135,7 +135,12 @@ function validationIssues(
 
 function isRetryableLookup(error: unknown): boolean {
   if (GatewayNotFoundError.isInstance(error)) return true;
-  if (GatewayResponseError.isInstance(error)) return error.isRetryable;
+  if (GatewayResponseError.isInstance(error)) {
+    // The generation-info endpoint returns its eventual-consistency miss as a
+    // 404 body outside the Gateway error schema. The SDK consequently wraps
+    // that response as GatewayResponseError instead of GatewayNotFoundError.
+    return error.statusCode === 404 || error.isRetryable;
+  }
   const code = statusCode(error);
   return (
     code === 404 ||
