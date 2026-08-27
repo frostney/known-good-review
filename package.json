@@ -10,13 +10,13 @@
   },
   "scripts": {
     "build": "eve build --skip-sandbox-prewarm",
-    "check": "bun run typecheck && bun test && bun run eval:offline && bun run eve:info && bun run build",
+    "check": "bun run typecheck && bun test && bun run test:e2e:mock && bun run eve:info && bun run build",
     "dev": "eve dev",
     "eve:info": "eve info --json",
-    "eval:offline": "cd tests/fixtures/eve-review-contract && bun x eve eval --strict --skip-report",
     "replay:pr61": "bun run scripts/replay-review.ts",
     "start": "eve start",
     "test": "bun test",
+    "test:e2e:mock": "cd tests/fixtures/eve-runtime-smoke && bun x eve eval --strict --skip-report",
     "typecheck": "tsc --noEmit && tsc -p convex/tsconfig.json --noEmit"
   },
   "dependencies": {

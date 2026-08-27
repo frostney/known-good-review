@@ -2,7 +2,7 @@ import { defineTool, toolOutput } from "eve/tools";
 import { z } from "zod";
 
 export default defineTool({
-  description: "Record one inert child-agent step for the routing eval.",
+  description: "Record one inert child-agent step for the runtime smoke test.",
   inputSchema: z.object({ marker: z.literal("routing") }).strict(),
   execute({ marker }) {
     return { marker };

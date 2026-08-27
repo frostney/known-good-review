@@ -21,6 +21,26 @@ model simulation: `MockLanguageModelV4`, `MockProviderV4`, `mockValues`, and
 assertions from Eve. Exercise Gateway transport and error normalization from
 raw HTTP responses through the installed provider.
 
+Keep the test tiers explicit. `bun test` owns pure and in-memory contract
+checks, including provider-visible JSON Schema, tool input rejection, report
+assembly, routing, instrumentation, recovery, and recorded production replay.
+`bun run test:e2e:mock` owns one provider-free Eve runtime smoke test for build,
+boot, HTTP session streaming, root-copy delegation, and child completion. Do
+not duplicate schema matrices in the Eve smoke fixture.
+
+`bun run check` is the hard offline completion gate. It must pass TypeScript,
+unit and integration tests, the deterministic Eve runtime smoke test, Eve
+discovery with no diagnostics, and the production build. The recorded PR 61
+replay must preserve all four canonical finding transitions. These checks must
+not require model, judge, reporter, Gateway, GitHub, or telemetry credentials.
+
+Real-model evals own model-dependent quality: appropriate tool and axis use,
+material finding coverage, duplicate and false-positive control, canonical
+finding and revalidation behavior, and complete exact-head review delivery.
+Tag them `real-model` and run them only with explicit paid authorization.
+Report phase latency, tokens, cache use, and cost for comparison, but do not use
+diff-size heuristics or hard time, token, or cost acceptance caps.
+
 Project-local development skills live under `.agents/skills/` and are managed
 through `skills-lock.json`; never copy skill folders by hand. The runtime
 `code-review` skill lives under `agent/skills/code-review/` and must come from
