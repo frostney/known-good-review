@@ -1,5 +1,4 @@
 import { defineTool, toolOutput } from "eve/tools";
-import { z } from "zod";
 import { githubAdapter } from "../../src/github/chat-adapter";
 import {
   readLatestReviewState,
@@ -10,8 +9,8 @@ import { readLaneCheckpoint } from "../../src/review/lane-checkpoint";
 import {
   assembleCanonicalReviewReport,
   reportAssemblyFailure,
-  reviewReportDraftSchema,
 } from "../../src/review/report-assembly";
+import { assembleReviewReportInputSchema } from "../../src/review/tool-inputs";
 import { advanceReviewRecovery } from "../../src/review/recovery";
 import {
   currentRecoveryState,
@@ -23,11 +22,7 @@ import {
 } from "../lib/review-report";
 import { currentLaneCheckpointIdentity } from "../lib/review-evidence";
 
-export const assembleReviewReportInputSchema = z
-  .object({
-    draft: reviewReportDraftSchema,
-  })
-  .strict();
+export { assembleReviewReportInputSchema } from "../../src/review/tool-inputs";
 
 export default defineTool({
   description:

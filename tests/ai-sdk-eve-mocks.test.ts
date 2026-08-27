@@ -5,8 +5,10 @@ import {
   MockProviderV4,
 } from "ai/test";
 import { mockModel } from "eve/evals";
-import { assembleReviewReportInputSchema } from "../agent/tools/assemble_review_report";
-import { recordReviewRevalidationInputSchema } from "../agent/tools/record_review_revalidation";
+import {
+  assembleReviewReportInputSchema,
+  recordReviewRevalidationInputSchema,
+} from "../src/review/tool-inputs";
 
 const usage = {
   inputTokens: {

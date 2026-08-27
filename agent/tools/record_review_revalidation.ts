@@ -1,5 +1,4 @@
 import { defineTool, toolOutput } from "eve/tools";
-import { z } from "zod";
 import {
   currentReviewReportState,
   reviewReportState,
@@ -13,13 +12,9 @@ import {
   recordRevalidationResults,
   reportAssemblyFailure,
 } from "../../src/review/report-assembly";
-import { reviewFindingSchema } from "../../src/review/findings";
+import { recordReviewRevalidationInputSchema } from "../../src/review/tool-inputs";
 
-export const recordReviewRevalidationInputSchema = z
-  .object({
-    findings: z.array(reviewFindingSchema).max(100),
-  })
-  .strict();
+export { recordReviewRevalidationInputSchema } from "../../src/review/tool-inputs";
 
 export default defineTool({
   description:
