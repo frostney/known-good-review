@@ -15,7 +15,7 @@
         "ai": "7.0.79",
         "chat": "4.38.1",
         "convex": "1.45.0",
-        "eve": "0.45.0",
+        "eve": "0.45.2",
         "js-tiktoken": "1.0.21",
         "workflow": "5.0.0-beta.42",
         "yaml": "2.9.0",
@@ -665,7 +665,7 @@
 
     "etag": ["etag@1.8.1", "", {}, "sha512-aIL5Fx7mawVa300al2BnEE4iNvo1qETxLrPI/o05L7z6go7fCw1J6EQmbK4FmJ2AS7kgVF/KEZWufBfdClMcPg=="],
 
-    "eve": ["eve@0.45.0", "", { "dependencies": { "nitro": "3.0.260610-beta", "undici": "8.9.0" }, "peerDependencies": { "@opentelemetry/api": "^1.0.0", "ai": "^7.0.58", "braintrust": "^3.0.0", "just-bash": "^3.1.0", "microsandbox": "^0.5.0" }, "optionalPeers": ["@opentelemetry/api", "braintrust", "just-bash", "microsandbox"], "bin": { "eve": "./bin/eve.js" } }, "sha512-jbx7iYc4IwUx7vzSo619uSxzF5pX6G6RHH+J9kE05VXwdR9Isl65m99PSYSXNhV5/WwJnRR4G7QfHuhvbt5Irw=="],
+    "eve": ["eve@0.45.2", "", { "dependencies": { "nitro": "3.0.260610-beta", "undici": "8.9.0" }, "peerDependencies": { "@opentelemetry/api": "^1.0.0", "ai": "^7.0.58", "braintrust": "^3.0.0", "just-bash": "^3.1.0", "microsandbox": "^0.5.0" }, "optionalPeers": ["@opentelemetry/api", "braintrust", "just-bash", "microsandbox"], "bin": { "eve": "./bin/eve.js" } }, "sha512-VUFDVStaZ12ToqpGlJLeG2MJ/aO/rsG2IT3I/5fbu4nOuvJXscvHgmKscklHRMorJhI1Bb3dlWPIvys5fcpW+g=="],
 
     "events-universal": ["events-universal@1.0.1", "", { "dependencies": { "bare-events": "^2.7.0" } }, "sha512-LUd5euvbMLpwOF8m6ivPCbhQeSiYVNb8Vs0fQ8QjXo0JTkEHpz8pxdQf0gStltaPpw0Cca8b39KxvK9cfKRiAw=="],
 
