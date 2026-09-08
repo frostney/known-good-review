@@ -1,5 +1,8 @@
 import { expect, spyOn, test } from "bun:test";
 import type { HookContext, HookEvent } from "eve/hooks";
+import { ContextContainer, contextStorage } from "../node_modules/eve/dist/src/context/container.js";
+import { serializeContext, deserializeContext } from "../node_modules/eve/dist/src/context/serialize.js";
+import usageCapture from "./fixtures/pr65-telemetry-usage.json";
 import telemetry from "../agent/hooks/telemetry";
 
 test("flushes cancelled-turn usage once and stops only the root sandbox", async () => {
@@ -12,6 +15,8 @@ test("flushes cancelled-turn usage once and stops only the root sandbox", async 
         channel: { kind }, session: { id: `cancel-${kind}`, auth: { current: null } },
         getSandbox: async () => ({ stop: async () => { stops += 1; } }),
       } as unknown as HookContext;
+      const context = new ContextContainer();
+      await contextStorage.run(context, async () => {
       telemetry.events?.["step.completed"]?.({
         type: "step.completed", meta: { id: `event-${kind}` },
         data: { turnId: "turn", stepIndex: 0, usage: { inputTokens: 120, outputTokens: 8 } },
@@ -23,11 +28,173 @@ test("flushes cancelled-turn usage once and stops only the root sandbox", async 
       await telemetry.events?.["turn.cancelled"]?.(event, ctx);
       // Replayed terminal events must not emit already-flushed usage again.
       await telemetry.events?.["turn.cancelled"]?.(event, ctx);
+      });
     }
     const budgets = logged.filter((record) => record.event === "known-good-review.budget.completed");
     expect(budgets).toHaveLength(2);
     expect(budgets.map(({ inputTokens, outputTokens }) => ({ inputTokens, outputTokens })))
       .toEqual([{ inputTokens: 120, outputTokens: 8 }, { inputTokens: 120, outputTokens: 8 }]);
     expect(stops).toBe(2);
+  } finally { logging.mockRestore(); }
+});
+
+test("retains all PR65 model usage across fresh hook modules and native durable context restoration", async () => {
+  const logged: Record<string, unknown>[] = [];
+  const logging = spyOn(console, "info").mockImplementation(value => { logged.push(JSON.parse(String(value))); });
+  let serialized = {};
+  const ctx = { channel: { kind: "subagent" }, session: { id: usageCapture.sessionId, parent: {}, auth: { current: null } } } as unknown as HookContext;
+  let moduleIndex = 0;
+  // A distinct module instance at each boundary reproduces Workflow worker turnover.
+  const freshHook = async () => (await import(`../agent/hooks/telemetry.ts?usage-boundary=${moduleIndex++}`)).default as typeof telemetry;
+  try {
+    for (const step of usageCapture.steps) {
+      const hook = await freshHook();
+      const context = await deserializeContext(structuredClone(serialized));
+      await contextStorage.run(context, async () => {
+        const event = { type: "step.completed", meta: { id: step.generationId, at: "2026-09-08T00:00:00Z" }, data: {
+          ...step, finishReason: step.finishReason === "stop" ? "stop" : "tool-calls", providerMetadata: { gateway: { generationId: step.generationId } },
+        } } as HookEvent<"step.completed">;
+        await hook.events?.["step.completed"]?.(event, ctx);
+        // A new event envelope for the same generation is still one model call.
+        await hook.events?.["step.completed"]?.({
+          ...event, meta: { ...event.meta, id: `${event.meta.id}-redelivered` },
+        }, ctx);
+      });
+      serialized = serializeContext(context);
+    }
+    for (let terminalDelivery = 0; terminalDelivery < 2; terminalDelivery++) {
+      const hook = await freshHook();
+      const context = await deserializeContext(structuredClone(serialized));
+      await contextStorage.run(context, async () => {
+        await hook.events?.["turn.cancelled"]?.({ type: "turn.cancelled", meta: { id: "cancel-capture", at: "2026-09-08T00:00:00Z" }, data: { turnId: "turn_0", sequence: 1 } }, ctx);
+      });
+      serialized = serializeContext(context);
+    }
+    const budgets = logged.filter(record => record.event === "known-good-review.budget.completed");
+    expect(budgets).toHaveLength(1);
+    expect(budgets[0]).toMatchObject({ scope: "session-turn", modelSteps: 5, inputTokens: 76832,
+      outputTokens: 2574, cacheReadTokens: 56974, cacheWriteTokens: 19848 });
+    expect(budgets[0]?.sdkCostUsd).toBeCloseTo(0.0743096, 10);
+  } finally { logging.mockRestore(); }
+});
+
+test("reports absent SDK quantities as unknown instead of zero", async () => {
+  const logged: Record<string, unknown>[] = [];
+  const logging = spyOn(console, "info").mockImplementation(value => { logged.push(JSON.parse(String(value))); });
+  const ctx = { channel: { kind: "subagent" }, session: { id: "unknown-usage", parent: {}, auth: { current: null } } } as unknown as HookContext;
+  try {
+    await contextStorage.run(new ContextContainer(), async () => {
+      telemetry.events?.["step.completed"]?.({ type: "step.completed", meta: { id: "unknown" },
+        data: { turnId: "turn", stepIndex: 0, usage: { inputTokens: 12 } } } as HookEvent<"step.completed">, ctx);
+      await telemetry.events?.["turn.cancelled"]?.({ type: "turn.cancelled", meta: { id: "cancel-unknown", at: "2026-09-08T00:00:00Z" }, data: { turnId: "turn", sequence: 1 } }, ctx);
+    });
+    expect(logged.find(record => record.event === "known-good-review.model.completed")).toMatchObject({
+      inputTokens: 12, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, costUsd: null, sdkCostUsd: null,
+    });
+    expect(logged.find(record => record.event === "known-good-review.budget.completed")).toMatchObject({
+      inputTokens: 12, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, sdkCostUsd: null,
+    });
+  } finally { logging.mockRestore(); }
+});
+
+
+test("retains measured zero token and cost quantities in completed-model logging", async () => {
+  const logged: Record<string, unknown>[] = [];
+  const logging = spyOn(console, "info").mockImplementation(value => { logged.push(JSON.parse(String(value))); });
+  const ctx = { channel: { kind: "subagent" }, session: { id: "zero-usage", parent: {}, auth: { current: null } } } as unknown as HookContext;
+  try {
+    await contextStorage.run(new ContextContainer(), async () => {
+      telemetry.events?.["step.completed"]?.({ type: "step.completed", meta: { id: "zero" },
+        data: { turnId: "turn", stepIndex: 0, usage: { inputTokens: 0, outputTokens: 0,
+          cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 } } } as HookEvent<"step.completed">, ctx);
+    });
+    expect(logged.find(record => record.event === "known-good-review.model.completed")).toMatchObject({
+      inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, sdkCostUsd: 0,
+    });
+  } finally { logging.mockRestore(); }
+});
+
+test("successful publication survives worker turnover and cannot bless a later turn", async () => {
+  const publication = await import("../src/github/publication");
+  const { registerDefinitionSource } = await import("../node_modules/eve/dist/src/internal/authored-definition/source-identity.js");
+  const publishTool = (await import("../agent/tools/publish_review")).default;
+  registerDefinitionSource(`tool:${publishTool.description}`, { kind: "tool", name: "publish_review" });
+  const failClosed = spyOn(publication, "publishFailClosedCheck").mockResolvedValue("offline-check");
+  const errorLogs = spyOn(console, "error").mockImplementation(() => {});
+  const network = spyOn(globalThis, "fetch").mockImplementation(Object.assign(async () => { throw new Error("Unexpected network call"); }, { preconnect() {} }));
+  const ctx = { channel: { kind: "github" }, session: { id: "published-root", auth: { current: { attributes: {
+    repository: "acme/widget", installation_id: "1", pull_request_number: "7",
+    known_good_review_repository_created_at: "0", known_good_review_repository_id: "R_widget",
+    known_good_review_base_sha: "base", known_good_review_head_sha: "head",
+    known_good_review_plan: JSON.stringify({ kind: "full" }),
+  } } } }, getSandbox: async () => ({ stop: async () => {} }) } as unknown as HookContext;
+  try {
+    const initial = new ContextContainer();
+    const initialHookPath = "../agent/hooks/telemetry.ts?publication=initial";
+    const hook = (await import(initialHookPath)).default as typeof telemetry;
+    await contextStorage.run(initial, async () => {
+      await hook.events?.["action.result"]?.({ type: "action.result", meta: { id: "publication", at: "2026-09-08T00:00:00Z" }, data: {
+        turnId: "published-turn", sequence: 1, stepIndex: 1, status: "completed",
+        result: { kind: "tool-result", toolName: "publish_review", callId: "publish-call", output: {} },
+      } } as HookEvent<"action.result">, ctx);
+    });
+    let serialized = serializeContext(initial);
+    for (const [delivery, turnId] of ["published-turn", "published-turn", "later-unpublished-turn"].entries()) {
+      const fresh = (await import(`../agent/hooks/telemetry.ts?publication=${turnId}-${delivery}`)).default as typeof telemetry;
+      const restored = await deserializeContext(structuredClone(serialized));
+      await contextStorage.run(restored, async () => {
+        await fresh.events?.["turn.completed"]?.({ type: "turn.completed", meta: { id: `end-${turnId}`, at: "2026-09-08T00:00:00Z" }, data: { turnId, sequence: 2 } }, ctx);
+      });
+      serialized = serializeContext(restored);
+      expect(failClosed).toHaveBeenCalledTimes(turnId === "published-turn" ? 0 : 1);
+    }
+    for (const terminal of ["turn.failed", "turn.cancelled"] as const) {
+      const freshPath = `../agent/hooks/telemetry.ts?publication-cleanup=${terminal}`;
+      const fresh = (await import(freshPath)).default as typeof telemetry;
+      const restored = await deserializeContext(structuredClone(serializeContext(initial)));
+      await contextStorage.run(restored, async () => {
+        if (terminal === "turn.failed") {
+          await fresh.events?.["turn.failed"]?.({ type: "turn.failed", meta: { id: terminal, at: "2026-09-08T00:00:00Z" },
+            data: { turnId: "published-turn", sequence: 2, code: "OFFLINE_TEST", message: "offline fixture" } }, ctx);
+        } else {
+          await fresh.events?.["turn.cancelled"]?.({ type: "turn.cancelled", meta: { id: terminal, at: "2026-09-08T00:00:00Z" },
+            data: { turnId: "published-turn", sequence: 2 } }, ctx);
+        }
+        const before = failClosed.mock.calls.length;
+        await fresh.events?.["turn.completed"]?.({ type: "turn.completed", meta: { id: "after-cleanup", at: "2026-09-08T00:00:00Z" },
+          data: { turnId: "published-turn", sequence: 3 } }, ctx);
+        expect(failClosed).toHaveBeenCalledTimes(before + 1);
+      });
+    }
+    expect(network).not.toHaveBeenCalled();
+  } finally { failClosed.mockRestore(); errorLogs.mockRestore(); network.mockRestore(); }
+});
+
+test("retains the bound lane and requested model across step worker turnover", async () => {
+  const { reviewRouteState } = await import("../agent/lib/review-route");
+  const logged: Record<string, unknown>[] = [];
+  const logging = spyOn(console, "info").mockImplementation(value => { logged.push(JSON.parse(String(value))); });
+  const ctx = { channel: { kind: "subagent" }, session: { id: "lane-worker", parent: {}, auth: { current: null } } } as unknown as HookContext;
+  try {
+    const initial = new ContextContainer();
+    const startedPath = "../agent/hooks/telemetry.ts?lane-worker=started";
+    const started = (await import(startedPath)).default as typeof telemetry;
+    await contextStorage.run(initial, async () => {
+      reviewRouteState.update(() => ({ role: "lane", axis: "engineering-quality", attempt: 2 }));
+      await started.events?.["step.started"]?.({ type: "step.started", meta: { id: "step-start", at: "2026-09-08T00:00:00Z" }, data: {
+        turnId: "lane-turn", stepIndex: 0, sequence: 0, modelId: "openai/gpt-5.6-sol",
+      } }, ctx);
+    });
+    const restored = await deserializeContext(structuredClone(serializeContext(initial)));
+    const completedPath = "../agent/hooks/telemetry.ts?lane-worker=completed";
+    const completed = (await import(completedPath)).default as typeof telemetry;
+    await contextStorage.run(restored, async () => {
+      await completed.events?.["step.completed"]?.({ type: "step.completed", meta: { id: "step-end", at: "2026-09-08T00:00:00Z" }, data: {
+        turnId: "lane-turn", stepIndex: 0, sequence: 0, finishReason: "stop", usage: { inputTokens: 12, outputTokens: 4 },
+      } }, ctx);
+    });
+    expect(logged.find(record => record.event === "known-good-review.model.completed")).toMatchObject({
+      requestedModel: "openai/gpt-5.6-sol", reviewAxis: "engineering-quality", phase: "fresh-axes", attempt: 2,
+    });
   } finally { logging.mockRestore(); }
 });

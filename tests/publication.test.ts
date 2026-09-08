@@ -6,6 +6,7 @@ import {
   findingBody,
   markInitialReviewRunning,
   parseActiveReviewExternalId,
+  publishFailClosedCheck,
   publishInProgressCheck,
   publishReview,
   readLatestReviewState,
@@ -24,6 +25,28 @@ import {
 } from "../src/review/recovery";
 
 const botUser = { id: 123, login: "known-good-review[bot]", type: "Bot" };
+
+test.each([false, true])("failed review check never claims completion (existing check: %s)", async (existing) => {
+  const writes: unknown[] = [];
+  const octokit = new Octokit({ request: { fetch: async (_resource: Request | string | URL, init?: RequestInit) => {
+    if ((init?.method ?? "GET") === "GET") {
+      return json({ check_runs: existing ? [{ id: 123, name: "known-good-review", status: "in_progress" }] : [] });
+    }
+    writes.push(JSON.parse(String(init?.body)));
+    return json({ id: 123, html_url: "https://github.com/acme/widget/runs/123" });
+  } } });
+  await publishFailClosedCheck({ context: context(), octokit, message: "Review stopped at axes; no lanes completed." });
+  expect(writes).toHaveLength(1);
+  const check = z.object({
+    conclusion: z.string(), output: z.object({ title: z.string(), summary: z.string() }),
+  }).parse(writes[0]);
+  expect(check.conclusion).toBe("action_required");
+  expect(check.output.title).toContain("review incomplete");
+  expect(check.output.summary).toContain("REVIEW INCOMPLETE");
+  expect(check.output.summary).not.toContain("REVIEW COMPLETE");
+  expect(check.output.summary).not.toContain("Reviewed base");
+  expect(check.output.summary).toContain("Review stopped at axes; no lanes completed.");
+});
 
 test("rejects oversized inline findings before attempting publication", async () => {
   let requests = 0;

@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import usageCapture from "./fixtures/pr65-telemetry-usage.json";
 import { createGateway, GatewayNotFoundError, GatewayResponseError } from "@ai-sdk/gateway";
 import {
   enqueuePendingGatewayTelemetry,
@@ -110,10 +111,8 @@ describe("Gateway telemetry reconciliation", () => {
         ...observation,
         actualModel: "openai/gpt-5.6-sol",
         provider: "bedrock",
-        inputTokens: 11,
-        outputTokens: 3,
-        cacheReadTokens: 5,
-        cacheWriteTokens: 2,
+        sdkCostUsd: 0.01,
+        gatewayNativeUsage: { promptTokens: 11, completionTokens: 3, reasoningTokens: 0, cachedTokens: 5, cacheCreationTokens: 2 },
         costUsd: 0.02,
         durationMs: 1_110,
         latencyMs: 120,
@@ -172,9 +171,9 @@ describe("Gateway telemetry reconciliation", () => {
   });
 
   test("deduplicates at-least-once hook delivery by stable generation identity", () => {
-    expect(enqueuePendingGatewayTelemetry([observation], observation)).toEqual([
-      observation,
-    ]);
+    expect(enqueuePendingGatewayTelemetry([observation], {
+      ...observation, eventId: "new-event-envelope",
+    })).toEqual([observation]);
     expect(() =>
       enqueuePendingGatewayTelemetry([observation], {
         ...observation,
@@ -299,4 +298,43 @@ describe("Gateway telemetry reconciliation", () => {
     expect(result.diagnostics[0]?.retryable).toBe(false);
     expect(result.diagnostics[0]).not.toHaveProperty("response");
   });
+});
+
+test("preserves all recorded PR65 SDK usage and exact Gateway accounting categories", async () => {
+  const pending = usageCapture.steps.map(step => ({
+    ...observation, ...step.usage, generationId: step.generationId,
+    stepIndex: step.stepIndex, turnId: step.turnId,
+  }));
+  const result = await reconcileGatewayTelemetry({
+    pending, retryDelaysMs: [0],
+    getGenerationInfo: id => {
+      const native = usageCapture.native.find(generation => generation.id === id);
+      if (!native) throw new Error("Missing recorded generation");
+      // Replay the real native response through the installed SDK parser.
+      const gateway = createGateway({
+        apiKey: "offline-capture", baseURL: "https://gateway.test/v4/ai",
+        fetch: Object.assign(async () => Response.json({ data: native }), { preconnect() {} }),
+      });
+      return gateway.getGenerationInfo({ id });
+    },
+  });
+  expect(result.pending).toEqual([]);
+  expect(result.resolved).toHaveLength(5);
+  for (const [index, resolved] of result.resolved.entries()) {
+    const recorded = usageCapture.steps[index];
+    const native = usageCapture.native[index];
+    expect(resolved).toMatchObject({
+      ...recorded?.usage,
+      sdkCostUsd: recorded?.usage.costUsd,
+      costUsd: native?.total_cost,
+      gatewayNativeUsage: {
+        promptTokens: native?.native_tokens_prompt,
+        completionTokens: native?.native_tokens_completion,
+        reasoningTokens: native?.native_tokens_reasoning,
+        cachedTokens: native?.native_tokens_cached,
+        cacheCreationTokens: native?.native_tokens_cache_creation,
+      },
+    });
+  }
+  expect(result.resolved.reduce((sum, entry) => sum + (entry.costUsd ?? 0), 0)).toBeCloseTo(0.0743096, 10);
 });

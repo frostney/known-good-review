@@ -11,6 +11,17 @@ import { isReviewAxis, type ReviewAxis } from "../review/axes";
 export const routingAttribute = "known_good_review_config";
 const routingPattern =
   /^<known-good-review-routing>(\{[^<\n]+\})<\/known-good-review-routing>/;
+// Eve's built-in agent wraps the initial caller message before delivering it
+// to the model resolver. Match the complete wrapper, never an embedded marker.
+// The installed-SDK regression test guards this version-dependent boundary.
+const eveAgentCallerPrefix = [
+  'You are the subagent "agent".',
+  "",
+  "The caller delegated the following task to you. Complete it and return the result directly. The caller may send follow-up messages after you answer.",
+  "",
+  "Caller message:",
+  "",
+].join("\n");
 
 export type ReviewRoute =
   | { readonly role: "coordinator"; readonly attempt: number }
@@ -46,9 +57,11 @@ export function parseSubagentRoute(messages: readonly ModelMessage[]): ReviewRou
   // Only the initial delegation owns routing. Later evidence and model output
   // can contain copied envelopes and must never change the lane or its model.
   const delegation = messages.find((message) => message.role === "user");
-  const encoded = delegation
-    ? routingPattern.exec(textFromMessage(delegation))?.[1]
-    : undefined;
+  const text = delegation ? textFromMessage(delegation) : "";
+  const callerMessage = text.startsWith(eveAgentCallerPrefix)
+    ? text.slice(eveAgentCallerPrefix.length)
+    : text;
+  const encoded = routingPattern.exec(callerMessage)?.[1];
   if (!encoded) {
     throw new Error("Review subagent message is missing its routing envelope");
   }

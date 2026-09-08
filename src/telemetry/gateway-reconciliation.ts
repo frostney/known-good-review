@@ -26,14 +26,22 @@ export interface PendingGatewayTelemetry {
   readonly attempt: number;
   readonly memoryPolicyHash: string;
   readonly requestedModel: string;
-  readonly inputTokens: number;
-  readonly outputTokens: number;
-  readonly cacheReadTokens: number;
-  readonly cacheWriteTokens: number;
-  readonly costUsd: number;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  readonly cacheReadTokens: number | null;
+  readonly cacheWriteTokens: number | null;
+  readonly costUsd: number | null;
 }
 
 export interface ReconciledGatewayTelemetry extends PendingGatewayTelemetry {
+  readonly sdkCostUsd: number | null;
+  readonly gatewayNativeUsage: {
+    readonly promptTokens: number;
+    readonly completionTokens: number;
+    readonly reasoningTokens: number;
+    readonly cachedTokens: number;
+    readonly cacheCreationTokens: number;
+  };
   readonly actualModel: string;
   readonly provider: string;
   readonly durationMs: number;
@@ -86,7 +94,8 @@ export function enqueuePendingGatewayTelemetry(
     (candidate) => gatewayTelemetryIdentity(candidate) === identity,
   );
   if (!existing) return [...current, observation];
-  if (JSON.stringify(existing) !== JSON.stringify(observation)) {
+  // The stable generation identity can arrive in a fresh event envelope.
+  if (JSON.stringify({ ...existing, eventId: observation.eventId }) !== JSON.stringify(observation)) {
     throw new Error("Conflicting Gateway telemetry shares one stable identity");
   }
   return current;
@@ -180,10 +189,16 @@ function enriched(
     ...observation,
     actualModel: generation.model,
     provider: generation.providerName,
-    inputTokens: generation.promptTokens,
-    outputTokens: generation.completionTokens,
-    cacheReadTokens: generation.cachedTokens,
-    cacheWriteTokens: generation.cacheCreationTokens,
+    // Native Gateway categories need not have SDK total-token semantics.
+    // Preserve both observations instead of replacing cache-inclusive SDK usage.
+    sdkCostUsd: observation.costUsd,
+    gatewayNativeUsage: {
+      promptTokens: generation.promptTokens,
+      completionTokens: generation.completionTokens,
+      reasoningTokens: generation.reasoningTokens,
+      cachedTokens: generation.cachedTokens,
+      cacheCreationTokens: generation.cacheCreationTokens,
+    },
     costUsd: generation.totalCost,
     durationMs: generation.generationTime,
     latencyMs: generation.latency,

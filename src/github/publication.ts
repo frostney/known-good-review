@@ -279,7 +279,15 @@ async function upsertCheck(
         : config.blocking && hasBlockingFinding(report)
         ? "known-good-review: changes requested"
         : "known-good-review: review complete",
-      summary: checkSummary(report, config).slice(0, 65_535),
+      summary: (forcedConclusion === "action_required"
+        ? [
+          "Policy result: **REVIEW INCOMPLETE**",
+          "",
+          "No review verdict was published.",
+          "",
+          ...report.limitations,
+        ].join("\n")
+        : checkSummary(report, config)).slice(0, 65_535),
     },
   };
   if (existing) {
