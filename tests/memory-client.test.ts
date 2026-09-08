@@ -3,6 +3,7 @@ import { parseReviewConfig } from "../src/config/review-config";
 import type { TrustedGitHubContext } from "../src/github/trusted-context";
 import { normalizedReviewMemory } from "../src/memory/client";
 import type { ReviewReport } from "../src/review/findings";
+import { z } from "zod";
 
 const context: TrustedGitHubContext = {
   installationId: 1,
@@ -154,6 +155,68 @@ test("captures admission before checking current GitHub access and skips unadmit
     expect(fetcher.mock.calls).toHaveLength(count);
     const admitted = normalizedReviewMemory({ config: parseReviewConfig(null), context: { ...context, memoryAdmission: "access:0" }, report, reviewKind: "full" });
     expect(admitted.memoryAdmission).toBe("access:0");
+  } finally {
+    fetcher.mockRestore();
+    if (previousUrl === undefined) delete process.env.CONVEX_MEMORY_URL; else process.env.CONVEX_MEMORY_URL = previousUrl;
+    if (previousToken === undefined) delete process.env.KNOWN_GOOD_REVIEW_MEMORY_TOKEN; else process.env.KNOWN_GOOD_REVIEW_MEMORY_TOKEN = previousToken;
+  }
+});
+
+test("stages the new app before the admission backend without fabricating receipts", async () => {
+  const { captureMemoryAdmission, enqueueReviewMemory, requestMemoryDeletion } = await import("../src/memory/client");
+  const { spyOn } = await import("bun:test");
+  // Exact deletion contract deployed at 59bf616; keep independent of the new schema.
+  const legacyDeletion = z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("repositories"), repositoryIds: z.array(z.string().min(1)).min(1) }),
+    z.object({ kind: z.literal("installation"), installationId: z.number().int().positive(), retainedRepositoryIds: z.array(z.string().min(1)) }),
+  ]);
+  const previousUrl = process.env.CONVEX_MEMORY_URL;
+  const previousToken = process.env.KNOWN_GOOD_REVIEW_MEMORY_TOKEN;
+  process.env.CONVEX_MEMORY_URL = "https://memory.example.test";
+  process.env.KNOWN_GOOD_REVIEW_MEMORY_TOKEN = "test-only-memory-token";
+  let upgraded = false;
+  const acceptedDeletions: unknown[] = [];
+  const ingestions: unknown[] = [];
+  const order: string[] = [];
+  const fetcher = spyOn(globalThis, "fetch").mockImplementation(Object.assign(async (resource: URL | RequestInfo, options?: RequestInit) => {
+    const path = new URL(String(resource)).pathname;
+    expect(new Headers(options?.headers).get("authorization")).toBe("Bearer test-only-memory-token");
+    if (path === "/memory/admission") {
+      order.push("capture");
+      return upgraded ? Response.json({ receipt: "access:0" }) : new Response("Not found", { status: 404 });
+    }
+    if (path === "/memory/delete") {
+      acceptedDeletions.push(legacyDeletion.parse(JSON.parse(String(options?.body))));
+      return Response.json({ accepted: true }, { status: 202 });
+    }
+    if (path === "/memory/ingest" && upgraded) {
+      ingestions.push(JSON.parse(String(options?.body)));
+      return Response.json({ accepted: true }, { status: 202 });
+    }
+    throw new Error(`Unexpected migration request: ${path}`);
+  }, { preconnect: () => {} }));
+  try {
+    const identity = { installationId: 1, repositoryId: "R_repo" };
+    const verifyAccess = async () => { order.push("verify-access"); return true; };
+    expect(await captureMemoryAdmission(identity, verifyAccess)).toBeNull();
+    expect(order).toEqual(["capture"]);
+    const transitional = normalizedReviewMemory({ config: parseReviewConfig(null), context, report, reviewKind: "full" });
+    expect(await enqueueReviewMemory(transitional)).toBe("unavailable");
+    await requestMemoryDeletion({ kind: "repositories", ...identity, repositoryIds: ["R_repo"], deliveryId: "remove" });
+    await requestMemoryDeletion({ kind: "installation", installationId: 1, retainedRepositoryIds: [], uninstalled: true, deliveryId: "uninstall" });
+    expect(acceptedDeletions).toEqual([
+      { kind: "repositories", repositoryIds: ["R_repo"] },
+      { kind: "installation", installationId: 1, retainedRepositoryIds: [] },
+    ]);
+    upgraded = true;
+    // Finishing an older review after backend promotion never invents authority.
+    expect(await enqueueReviewMemory(transitional)).toBe("unavailable");
+    expect(ingestions).toEqual([]);
+    expect(await captureMemoryAdmission(identity, verifyAccess)).toBe("access:0");
+    expect(order).toEqual(["capture", "capture", "verify-access"]);
+    const fresh = normalizedReviewMemory({ config: parseReviewConfig(null), context: { ...context, memoryAdmission: "access:0" }, report, reviewKind: "full" });
+    expect(await enqueueReviewMemory(fresh)).toBe("queued");
+    expect(ingestions).toEqual([fresh]);
   } finally {
     fetcher.mockRestore();
     if (previousUrl === undefined) delete process.env.CONVEX_MEMORY_URL; else process.env.CONVEX_MEMORY_URL = previousUrl;

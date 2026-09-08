@@ -19,35 +19,54 @@ bytes encoded as 64 hexadecimal characters, stable across replicas and restarts.
 Preserve an existing valid key. Never inject it into repository sandboxes or
 Convex. Keep the shared memory bearer token aligned between the app and Convex.
 
-## Compatibility and rollout
+## App-first migration
 
-This change requires a coordinated maintenance window. The new app requires
-`/memory/admission`, which the old backend lacks. The new backend rejects old
-ingestion requests without admission receipts and old deletion request shapes.
-Do not run arbitrary mixtures of old and new instances.
+Deploy the app before replacing the backend. New callers already tolerate the
+old backend's missing admission endpoint: they receive no receipt and skip
+advisory memory ingestion. New deletion bodies are accepted by the old Zod
+contract, which strips added fields and retains existing cleanup. Search remains
+compatible. `tests/memory-client.test.ts` covers this transition against the
+exact old deletion schemas from `59bf616`.
 
-1. Verify an operator-supported way to pause incoming Connect delivery while
-   preserving events for replay. If delivery cannot be paused durably, stop the
-   rollout and implement a compatible staged migration first.
-2. Drain active Eve reviews and scheduled Convex ingestion, migration and
-   deletion work. Record the deployed app/backend versions and a recoverable
-   database backup before mutation.
-3. Deploy the matching Convex functions and schema, then the app with its signing
-   key and verified full sandbox build. Keep ingress paused through both steps.
-4. Check `/eve/v1/health`, authenticated memory admission, and sandbox startup.
-   Resume delivery only when both matching deployments are healthy. Start fresh
-   review sessions; unsigned evidence cannot resume under the new verifier.
+1. Build the exact CI-green app revision in the existing production environment
+   with `bun run migration:check && bunx eve build`. Override the combined build
+   command for this deployment only; do not deploy Convex yet. Use Vercel's
+   `--prod --skip-domain` so health and artifact checks precede alias promotion.
+2. Verify the app and sandbox, then promote it to the existing production alias
+   used by Connect. No incoming events need to be paused. During this phase,
+   reviews publish normally and skip new memory ingestion.
+3. Inspect Workflow runs and steps. Retire parked sessions from older app
+   deployments through supported session controls; let real active turns and
+   HTTP invocations finish. New full/delta dispatches already reset sessions.
+   Never restart old unsigned evidence as a new review.
+4. Run `bun run migration:check` in the trusted production build environment
+   immediately before the backend switch. It invokes Convex's native read-only
+   query and rejects queued/running scheduled work, pending ingestion, migration
+   and deletion. If inspection exceeds its bound, drain through paginated
+   inspection first. Credentials remain in the trusted build environment.
+5. After old callers and actions are drained, deploy the backend with the new
+   app using `bun run migration:check && bunx convex deploy --cmd 'bunx eve build'`.
+   Preserve the existing evidence key and the shared memory token.
+6. Verify fresh admission, revocation, hosted sandbox and publication. Start a
+   fresh full/delta evaluation. Reviews begun during the transition retain null
+   admission and skip ingestion even if they finish after backend promotion.
 
-Old sessions without admission receipts may finish publication but skip memory
-ingestion. New sessions restore admission. A new signing key also invalidates
-old signed evidence, so preserve the configured key during retries.
+This order matters: old callers are incompatible with the new backend, and old
+executing Convex actions can call internal functions whose contracts changed.
+Do not infer drained work from an idle workflow count alone. Sleeping session
+and timeout workflows remain pinned to their original deployment until retired.
+
+Connect does not provide a documented lossless maintenance pause. Failed
+forwarding gets bounded retries, so detaching Connect or returning `503` is not
+an event-preserving rollout mechanism.
 
 ## Recovery limits
 
-An app-only rollback would restore callers incompatible with the new backend.
+Before the backend switch, the old app and backend remain an app-only rollback
+option. After that switch, an app-only rollback would restore incompatible callers.
 The old Convex schema may reject newly written fields and tables. An immediate
-two-sided rollback has not been validated. Keep ingress paused after a failed
-rollout and repair forward or rehearse a compatible recovery on a disposable
+two-sided rollback has not been validated. Stop the staged rollout after a failed gate and repair forward or rehearse a
+compatible recovery on a disposable
 deployment before restoring service. Do not erase revocation records to make an
 old schema deploy: that could allow delayed requests to recreate deleted data.
 

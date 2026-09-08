@@ -13,6 +13,7 @@
     "check": "bun run typecheck && bun test && bun run eve:info && bun run build",
     "dev": "eve dev",
     "eve:info": "eve info --json",
+    "migration:check": "bun run scripts/check-memory-migration.ts",
     "replay:pr61": "bun run scripts/replay-review.ts",
     "start": "eve start",
     "test": "bun test",

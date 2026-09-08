@@ -187,7 +187,7 @@ delete.
 
 ## External setup
 
-For this audit release, follow the [coordinated rollout and live validation
+For this audit release, follow the [app-first rollout and live validation
 procedure](docs/deployment.md), including the app/backend compatibility gate.
 
 Provision the Connect-backed GitHub App with Eve's current setup flow, create
