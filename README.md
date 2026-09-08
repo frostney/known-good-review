@@ -187,6 +187,9 @@ delete.
 
 ## External setup
 
+For this audit release, follow the [coordinated rollout and live validation
+procedure](docs/deployment.md), including the app/backend compatibility gate.
+
 Provision the Connect-backed GitHub App with Eve's current setup flow, create
 the Convex deployment, deploy the app to Vercel, and install it on selected
 repositories. Set `KNOWN_GOOD_REVIEW_EVIDENCE_KEY` in the app environment to
