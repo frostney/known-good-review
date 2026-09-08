@@ -1,6 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type { ModelChain } from "../src/config/review-config";
-import { nextFallbackModel } from "../src/models/fallback";
 import {
   changedEffectiveFiles,
   effectivePatchFileFingerprints,
@@ -95,21 +93,6 @@ describe("review mechanics", () => {
       },
     ]);
     expect(changedEffectiveFiles(baseline, current)).toEqual(["a.ts"]);
-  });
-
-  test("falls back only for classified transient failures", () => {
-    const chain = [
-      "openai/gpt-5.6-sol",
-      "anthropic/claude-opus-5",
-    ] as ModelChain;
-    expect(nextFallbackModel(chain, 0, { httpStatus: 429 })).toEqual({
-      attempt: 1,
-      model: "anthropic/claude-opus-5",
-    });
-    expect(nextFallbackModel(chain, 0, { code: "authentication_error" })).toBe(
-      null,
-    );
-    expect(nextFallbackModel(chain, 1, { httpStatus: 503 })).toBe(null);
   });
 
   test("revalidates all material findings and only relevant improvements", () => {

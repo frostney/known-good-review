@@ -1,8 +1,10 @@
 import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { z } from "zod";
 import {
   memoryDeletionSchema,
+  memoryAdmissionRequestSchema,
   memoryIngestionSchema,
   memorySearchRequestSchema,
 } from "../src/memory/contracts";
@@ -38,17 +40,36 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+async function requestBody<T>(request: Request, schema: z.ZodType<T>): Promise<T | null> {
+  const body: unknown = await request.json().catch(() => null);
+  const parsed = schema.safeParse(body);
+  return parsed.success ? parsed.data : null;
+}
+
+http.route({
+  path: "/memory/admission",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    if (!(await isAuthorized(request))) return json({ error: "unauthorized" }, 401);
+    const admission = await requestBody(request, memoryAdmissionRequestSchema);
+    if (!admission) return json({ error: "invalid_request" }, 400);
+    return json(await ctx.runMutation(internal.memoryAccess.captureAdmission, admission));
+  }),
+});
+
 http.route({
   path: "/memory/ingest",
   method: "POST",
   handler: httpAction(async (ctx, request) => {
     if (!(await isAuthorized(request))) return json({ error: "unauthorized" }, 401);
-    const ingestion = memoryIngestionSchema.parse(await request.json());
+    const ingestion = await requestBody(request, memoryIngestionSchema);
+    if (!ingestion) return json({ error: "invalid_request" }, 400);
+    if (!ingestion.memoryAdmission) return json({ error: "memory_admission_required" }, 409);
     const queued = await ctx.runMutation(
       internal.memoryData.queueReview,
-      ingestion,
+      { ...ingestion, memoryAdmission: ingestion.memoryAdmission },
     );
-    return json(queued, 202);
+    return json(queued, queued.status === "revoked" ? 409 : 202);
   }),
 });
 
@@ -57,7 +78,8 @@ http.route({
   method: "POST",
   handler: httpAction(async (ctx, request) => {
     if (!(await isAuthorized(request))) return json({ error: "unauthorized" }, 401);
-    const search = memorySearchRequestSchema.parse(await request.json());
+    const search = await requestBody(request, memorySearchRequestSchema);
+    if (!search) return json({ error: "invalid_request" }, 400);
     return json(
       await ctx.runAction(internal.memoryActions.searchRepository, search),
     );
@@ -69,10 +91,13 @@ http.route({
   method: "POST",
   handler: httpAction(async (ctx, request) => {
     if (!(await isAuthorized(request))) return json({ error: "unauthorized" }, 401);
-    const deletion = memoryDeletionSchema.parse(await request.json());
+    const deletion = await requestBody(request, memoryDeletionSchema);
+    if (!deletion) return json({ error: "invalid_request" }, 400);
     if (deletion.kind === "repositories") {
       for (let start = 0; start < deletion.repositoryIds.length; start += 100) {
         await ctx.runMutation(internal.memoryData.beginRepositoriesDeletion, {
+          installationId: deletion.installationId,
+          deliveryId: deletion.deliveryId,
           repositoryIds: deletion.repositoryIds.slice(start, start + 100),
         });
       }
@@ -81,6 +106,9 @@ http.route({
         internal.memoryData.reconcileInstallationRepositories,
         {
           installationId: deletion.installationId,
+          deliveryId: deletion.deliveryId,
+          uninstalled: deletion.uninstalled,
+          phase: "access",
           retainedRepositoryIds: deletion.retainedRepositoryIds,
           cursor: null,
         },

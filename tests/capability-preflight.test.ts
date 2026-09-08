@@ -20,7 +20,7 @@ const identity = {
 };
 
 const ledgerIdentity = {
-  executionRevision: "review-evidence-v2" as const,
+  executionRevision: "review-evidence-v3" as const,
   repositoryId: "R_test",
   repositoryDatabaseId: 41,
   repository: "frostney/pascal-mcp-sdk",

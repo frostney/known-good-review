@@ -12,11 +12,13 @@ import {
   trustedGitHubContext,
 } from "../../src/github/trusted-context";
 import { reviewAxes } from "../../src/review/axes";
+import { reviewFileScopeSchema } from "../../src/review/prepare-review-evidence";
 
 const reportPlanSchema = z.object({
   kind: z.enum(["full", "delta"]),
   activeAxes: z.array(z.enum(reviewAxes)).min(1).max(reviewAxes.length),
   selectedFindingIds: z.array(z.string().regex(/^CR-[1-9]\d*$/)).max(100),
+  baselineHead: z.string().nullable(),
 });
 
 export const reviewReportState = defineState<ReportAssemblyState | null>(
@@ -36,14 +38,19 @@ export function reportAssemblyIdentityFromAuth(
     throw new Error("Trusted review report is missing its plan");
   }
   const plan = reportPlanSchema.parse(JSON.parse(rawPlan));
+  const rawFiles = auth?.attributes[reviewContextAttributes.reviewFiles];
+  if (typeof rawFiles !== "string") throw new Error("Trusted review report is missing its file scope");
+  const reviewPaths = reviewFileScopeSchema.parse(JSON.parse(rawFiles)).map((file) => file.path);
   return reportAssemblyIdentitySchema.parse({
-    executionRevision: "review-report-v1",
+    executionRevision: "review-report-v2",
     repositoryId: trusted.repositoryId,
     pullRequest: trusted.pullRequest,
     baseSha: trusted.baseSha,
     headSha: trusted.headSha,
     patchFingerprint: trusted.patchFingerprint,
     planKind: plan.kind,
+    baselineHead: plan.baselineHead,
+    reviewPaths,
     activeAxes: plan.activeAxes,
     selectedFindingIds: plan.selectedFindingIds,
   });

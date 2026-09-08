@@ -1,5 +1,6 @@
 import { createGitHubAdapter } from "@chat-adapter/github";
 import { connectGitHubAdapter } from "@vercel/connect/chat";
+import { reviewBotLogin } from "./comment-identity";
 
 export const githubConnector =
   process.env.KNOWN_GOOD_REVIEW_GITHUB_CONNECTOR ??
@@ -12,6 +13,6 @@ export function githubAdapter(installationId: number) {
       installationId: String(installationId),
     }),
     ...(botUserId ? { botUserId: Number(botUserId) } : {}),
-    userName: "known-good-review[bot]",
+    userName: reviewBotLogin,
   });
 }

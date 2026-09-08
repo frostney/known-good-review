@@ -26,6 +26,12 @@ function finding(): ReviewFinding {
 }
 
 describe("deterministic review presentation", () => {
+  test("preserves long words and recognizes paths at punctuation boundaries", () => {
+    const text = "x".repeat(65_000);
+    const input = { ...finding(), impact: `${text}; (/src/file.ts),./docs/page.md` };
+    const output = renderRichText(deterministicFindingPresentation(input).impact);
+    expect(output).toBe(`${text}; (/\`src/file.ts\`),\`./docs/page.md\``);
+  });
   test("formats paths, extensionless filenames, and symbols without a model", () => {
     const presentation = deterministicFindingPresentation(finding());
 

@@ -1,3 +1,5 @@
+import { getReviewEvidenceSandbox } from "../lib/evidence-sandbox";
+import { requireReviewLane } from "../lib/review-route";
 import { defineTool, toolOutput } from "eve/tools";
 import { z } from "zod";
 import { trustedGitHubContext } from "../../src/github/trusted-context";
@@ -51,13 +53,14 @@ export default defineTool({
     "Read or replace the compact schema-v3 checkpoint for one exact review axis. The application binds each checkpoint to the immutable evidence-ledger digest. A fresh lane continuation reads this first and reconciles it with the exact manifest. Write one checkpoint before returning complete or requesting a fresh continuation. Complete checkpoints preserve a strict typed terminal report; in-progress checkpoints preserve coverage, evidence-backed observations, remaining work, and limitations without raw tool history.",
   inputSchema: reviewLaneCheckpointInputSchema,
   async execute(input, ctx) {
+    if (input.operation === "write") requireReviewLane(input.axis);
     const trusted = trustedGitHubContext(ctx.session.auth.current);
     if (!trusted.patchFingerprint) {
       throw new Error(
         "Trusted review context is missing the patch fingerprint",
       );
     }
-    const sandbox = await ctx.getSandbox();
+    const sandbox = await getReviewEvidenceSandbox(ctx);
     const identity = await currentLaneCheckpointIdentity(
       ctx.session.auth.current,
       sandbox,

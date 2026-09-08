@@ -1,0 +1,185 @@
+{
+  "source": "PR65 root Workflow step outputs and Gateway generation responses, 2026-09-08; usage metadata only",
+  "sessionId": "wrun_41M1ZV01S60GPF9P3T7YT1R1GS",
+  "steps": [
+    {
+      "sequence": 0,
+      "stepIndex": 0,
+      "turnId": "turn_0",
+      "finishReason": "tool-calls",
+      "usage": {
+        "costUsd": 0.000788,
+        "inputTokens": 12998,
+        "outputTokens": 39,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 12996
+      },
+      "generationId": "gen_01M1ZV0A0XYGRAG8S9KPMDWM0H"
+    },
+    {
+      "sequence": 0,
+      "stepIndex": 1,
+      "turnId": "turn_0",
+      "finishReason": "tool-calls",
+      "usage": {
+        "costUsd": 0.0058464,
+        "inputTokens": 13215,
+        "outputTokens": 32,
+        "cacheReadTokens": 12996,
+        "cacheWriteTokens": 217
+      },
+      "generationId": "gen_01M1ZV0E548RJPT7HRH8GX4RN7"
+    },
+    {
+      "sequence": 0,
+      "stepIndex": 2,
+      "turnId": "turn_0",
+      "finishReason": "tool-calls",
+      "usage": {
+        "costUsd": 0.0056732,
+        "inputTokens": 13383,
+        "outputTokens": 19,
+        "cacheReadTokens": 13213,
+        "cacheWriteTokens": 168
+      },
+      "generationId": "gen_01M1ZV14YW8KD7PXWH0Q0HGAYZ"
+    },
+    {
+      "sequence": 0,
+      "stepIndex": 3,
+      "turnId": "turn_0",
+      "finishReason": "tool-calls",
+      "usage": {
+        "costUsd": 0.0516204,
+        "inputTokens": 17386,
+        "outputTokens": 2313,
+        "cacheReadTokens": 13381,
+        "cacheWriteTokens": 4003
+      },
+      "generationId": "gen_01M1ZV170Q9SE88C2BRQ2B4K50"
+    },
+    {
+      "sequence": 0,
+      "stepIndex": 3,
+      "turnId": "turn_0",
+      "finishReason": "stop",
+      "usage": {
+        "costUsd": 0.0103816,
+        "inputTokens": 19850,
+        "outputTokens": 171,
+        "cacheReadTokens": 17384,
+        "cacheWriteTokens": 2464
+      },
+      "generationId": "gen_01M1ZV2EV8G0NCJ3VFKFHFM4ZC"
+    }
+  ],
+  "native": [
+    {
+      "id": "gen_01M1ZV0A0XYGRAG8S9KPMDWM0H",
+      "total_cost": 0.000788,
+      "upstream_inference_cost": 0,
+      "usage": 0.000788,
+      "created_at": "2026-09-08T06:24:06.000Z",
+      "model": "openai/gpt-5.6-sol",
+      "is_byok": false,
+      "provider_name": "bedrock",
+      "streamed": true,
+      "finish_reason": "tool-calls",
+      "latency": 0,
+      "generation_time": 3693,
+      "native_tokens_prompt": 2,
+      "native_tokens_completion": 25,
+      "native_tokens_reasoning": 14,
+      "native_tokens_cached": 0,
+      "native_tokens_cache_creation": 0,
+      "billable_web_search_calls": 0
+    },
+    {
+      "id": "gen_01M1ZV0E548RJPT7HRH8GX4RN7",
+      "total_cost": 0.0058464,
+      "upstream_inference_cost": 0,
+      "usage": 0.0058464,
+      "created_at": "2026-09-08T06:24:10.000Z",
+      "model": "openai/gpt-5.6-sol",
+      "is_byok": false,
+      "provider_name": "bedrock",
+      "streamed": true,
+      "finish_reason": "tool-calls",
+      "latency": 0,
+      "generation_time": 7054,
+      "native_tokens_prompt": 2,
+      "native_tokens_completion": 17,
+      "native_tokens_reasoning": 15,
+      "native_tokens_cached": 12996,
+      "native_tokens_cache_creation": 0,
+      "billable_web_search_calls": 0
+    },
+    {
+      "id": "gen_01M1ZV14YW8KD7PXWH0Q0HGAYZ",
+      "total_cost": 0.0056732,
+      "upstream_inference_cost": 0,
+      "usage": 0.0056732,
+      "created_at": "2026-09-08T06:24:33.000Z",
+      "model": "openai/gpt-5.6-sol",
+      "is_byok": false,
+      "provider_name": "bedrock",
+      "streamed": true,
+      "finish_reason": "tool-calls",
+      "latency": 0,
+      "generation_time": 1645,
+      "native_tokens_prompt": 2,
+      "native_tokens_completion": 19,
+      "native_tokens_reasoning": 0,
+      "native_tokens_cached": 13213,
+      "native_tokens_cache_creation": 0,
+      "billable_web_search_calls": 0
+    },
+    {
+      "id": "gen_01M1ZV170Q9SE88C2BRQ2B4K50",
+      "total_cost": 0.0516204,
+      "upstream_inference_cost": 0,
+      "usage": 0.0516204,
+      "created_at": "2026-09-08T06:24:35.000Z",
+      "model": "openai/gpt-5.6-sol",
+      "is_byok": false,
+      "provider_name": "bedrock",
+      "streamed": true,
+      "finish_reason": "tool-calls",
+      "latency": 0,
+      "generation_time": 25815,
+      "native_tokens_prompt": 2,
+      "native_tokens_completion": 1838,
+      "native_tokens_reasoning": 475,
+      "native_tokens_cached": 13381,
+      "native_tokens_cache_creation": 0,
+      "billable_web_search_calls": 0
+    },
+    {
+      "id": "gen_01M1ZV2EV8G0NCJ3VFKFHFM4ZC",
+      "total_cost": 0.0103816,
+      "upstream_inference_cost": 0,
+      "usage": 0.0103816,
+      "created_at": "2026-09-08T06:25:16.000Z",
+      "model": "openai/gpt-5.6-sol",
+      "is_byok": false,
+      "provider_name": "bedrock",
+      "streamed": true,
+      "finish_reason": "stop",
+      "latency": 5373,
+      "generation_time": 5466,
+      "native_tokens_prompt": 2,
+      "native_tokens_completion": 44,
+      "native_tokens_reasoning": 127,
+      "native_tokens_cached": 17384,
+      "native_tokens_cache_creation": 0,
+      "billable_web_search_calls": 0
+    }
+  ],
+  "totals": {
+    "inputTokens": 76832,
+    "outputTokens": 2574,
+    "cacheReadTokens": 56974,
+    "cacheWriteTokens": 19848,
+    "costUsd": 0.0743096
+  }
+}

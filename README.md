@@ -50,8 +50,9 @@ flowchart TD
   A publication-only continuation retries GitHub directly without a model or
   completed review work.
 
-One visible GitHub summary comment also holds the hidden authoritative versioned
-review state and complete v2 findings artifact. Convex stores advisory,
+One GitHub summary comment holds the authoritative versioned review state and
+complete v2 findings artifact. Large state is compressed and, when needed, split
+into immutable attachments saved before the summary pointer changes. Convex stores advisory,
 repository-scoped cross-PR memory
 through `@convex-dev/rag`; it never owns the current verdict, baseline, or
 finding status. Recent matches remain individual while older matches collapse
@@ -117,6 +118,8 @@ Reviews are non-blocking by default. Set `blocking: true` to submit GitHub
 RAG's supported vector sizes. The defaults are `voyage/voyage-4` and 1024.
 Changing either value re-embeds the repository in a parallel namespace and
 promotes it only after the replacement is ready.
+Delta reviews reuse embeddings for unchanged finding text. Current finding
+outcomes and provenance come from application records during retrieval.
 
 `publicRoots` declares repository-relative public-content trees from the
 trusted base. Discoverability also activates for explicit website, SEO,
@@ -176,16 +179,27 @@ are measurements only and cannot stop, shorten, accept, or reject a review.
 The production sandbox has GitHub-only egress, no repository credentials, and
 one persistent Eve sandbox per PR session. Eve stops compute after each turn
 while retaining the filesystem for later deltas. Close/merge cleanup removes
-the inspected workspace before stopping it. Physical retention after stop is
+the inspected workspace and review evidence before stopping it, and reports
+deletion failures instead of claiming success. Physical retention after stop is
 owned by Vercel Sandbox; Eve's public runtime handle deliberately exposes
 `stop()`, not a provider sandbox identifier that application code could safely
 delete.
 
 ## External setup
 
+For this audit release, follow the [app-first rollout and live validation
+procedure](docs/deployment.md), including the app/backend compatibility gate.
+
 Provision the Connect-backed GitHub App with Eve's current setup flow, create
 the Convex deployment, deploy the app to Vercel, and install it on selected
-repositories. Give Convex its AI Gateway key and
+repositories. Set `KNOWN_GOOD_REVIEW_EVIDENCE_KEY` in the app environment to
+32 random bytes encoded as 64 hexadecimal characters. Keep it stable across
+replicas and restarts, and never pass it into a repository sandbox. Evidence is
+authenticated against this key, its exact path, and the root review session.
+Existing unsigned sessions and sessions affected by key rotation need fresh
+reviews. Missing or malformed keys reject review admission.
+
+Give Convex its AI Gateway key and
 the shared memory bearer token; give Eve the Convex HTTP-actions URL and the
 same token. The app needs repository metadata read, contents read, Actions read,
 pull requests read/write, issues read/write, and checks read/write. Forward
@@ -193,21 +207,31 @@ pull requests read/write, issues read/write, and checks read/write. Forward
 `installation_repositories` events through Connect to `/eve/v1/github`.
 
 The single GitHub route verifies installation lifecycle events with the same
-Connect OIDC verifier as Eve. Exact repository removals delete memory by
-immutable GitHub repository node ID. A complete uninstall deletes every
-repository remembered for that installation; the installation association is
-cleanup metadata and never becomes the memory namespace. The authenticated
-Convex `/memory/delete` endpoint accepts the cleanup before the webhook is
-acknowledged, then performs bounded, retrying, race-safe namespace deletion.
-When GitHub reports an all-to-selected access change with an empty removal
-list, the route reconciles memory against the repositories still accessible to
-the installation.
+Connect OIDC verifier as Eve. Before a review can later enqueue memory, it
+captures a Convex admission receipt and then verifies that the installation
+currently has access to the repository. Removal invalidates earlier receipts,
+including reviews that have not written any memory yet. Revocation records
+retain only installation/repository IDs, generations, and delivery IDs after
+content deletion; they prevent delayed requests from recreating deleted memory.
+Fresh authorized reviews can obtain a new receipt after repository re-addition.
+A complete uninstall permanently revokes that installation ID; reinstalling
+creates a different installation ID. Old sessions without a receipt can finish
+publication but do not enqueue memory; start a fresh review to restore ingestion.
+
+The authenticated Convex `/memory/delete` endpoint admits cleanup before the
+webhook is acknowledged. Native GitHub delivery IDs make redelivery idempotent.
+Forwarded requests without that header receive an application job ID, and every
+repository-removal event rechecks current installation access before deleting.
+An empty removal list reconciles both registered admissions and stored memory
+against the remaining accessible repositories. Cleanup drains active writers,
+deletes every RAG namespace version and its entries, then removes application
+rows. Each job targets its original repository record; an 11-minute watchdog
+retries abandoned cleanup without touching a replacement record.
 
 Do not add a second Chat SDK webhook route. The decorated Eve route owns inbound
 verification, lifecycle cleanup, durable PR sessions, checkout, and steering.
 The Chat SDK adapter is the typed outbound publication boundary for Check Runs,
-the result summary, inline finding threads, and the rare
-installation-reconciliation API read.
+the result summary, inline finding threads, and installation-access API reads.
 
 See [architecture](docs/architecture.md), [domain context](CONTEXT.md), and
 [skill provenance](docs/skill-provenance.md).

@@ -1,22 +1,118 @@
 import { describe, expect, test } from "bun:test";
 import { Octokit } from "@octokit/rest";
+import { z } from "zod";
 import {
   activeReviewExternalId,
   findingBody,
+  markInitialReviewRunning,
   parseActiveReviewExternalId,
+  publishFailClosedCheck,
   publishInProgressCheck,
   publishReview,
+  readLatestReviewState,
   stageReviewPublication,
+  writeReviewState,
   writeReviewFailureState,
 } from "../src/github/publication";
-import { decodeReviewState, encodeReviewState } from "../src/github/review-state";
+import { decodeReviewState, encodeReviewState, maxReviewStateBytes } from "../src/github/review-state";
 import type { TrustedGitHubContext } from "../src/github/trusted-context";
 import type { ReviewReport } from "../src/review/findings";
+import { beginReportAssembly, reportAssemblyFailure, ReviewReportValidationError } from "../src/review/report-assembly";
 import {
   advanceReviewRecovery,
   beginReviewRecovery,
   buildReviewFailureEnvelope,
 } from "../src/review/recovery";
+
+const botUser = { id: 123, login: "known-good-review[bot]", type: "Bot" };
+
+test.each([false, true])("failed review check never claims completion (existing check: %s)", async (existing) => {
+  const writes: unknown[] = [];
+  const octokit = new Octokit({ request: { fetch: async (_resource: Request | string | URL, init?: RequestInit) => {
+    if ((init?.method ?? "GET") === "GET") {
+      return json({ check_runs: existing ? [{ id: 123, name: "known-good-review", status: "in_progress" }] : [] });
+    }
+    writes.push(JSON.parse(String(init?.body)));
+    return json({ id: 123, html_url: "https://github.com/acme/widget/runs/123" });
+  } } });
+  await publishFailClosedCheck({ context: context(), octokit, message: "Review stopped at axes; no lanes completed." });
+  expect(writes).toHaveLength(1);
+  const check = z.object({
+    conclusion: z.string(), output: z.object({ title: z.string(), summary: z.string() }),
+  }).parse(writes[0]);
+  expect(check.conclusion).toBe("action_required");
+  expect(check.output.title).toContain("review incomplete");
+  expect(check.output.summary).toContain("REVIEW INCOMPLETE");
+  expect(check.output.summary).not.toContain("REVIEW COMPLETE");
+  expect(check.output.summary).not.toContain("Reviewed base");
+  expect(check.output.summary).toContain("Review stopped at axes; no lanes completed.");
+});
+
+test("rejects oversized inline findings before attempting publication", async () => {
+  let requests = 0;
+  const octokit = new Octokit({ request: { fetch: async () => { requests += 1; return json([]); } } });
+  const oversized = report();
+  oversized.findings = oversized.findings.map((finding) => ({ ...finding, impact: "x".repeat(65_001) }));
+  await expect(publishReview({ octokit, context: context(), report: oversized }))
+    .rejects.toThrow("An inline finding exceeds");
+  expect(requests).toBe(0);
+});
+
+test("head verification advances debounce once and preserves publication policy and later state", async () => {
+  let body = encodeReviewState({
+    schemaVersion: 2, app: "known-good-review", pullRequest: 7, initialFullStatus: "debouncing",
+    publication: { blocking: true, profile: "thorough" }, baseline: null,
+    updatedAt: "2026-09-04T00:00:00.000Z",
+  });
+  let writes = 0;
+  const octokit = new Octokit({ request: { fetch: async (_resource: Request | string | URL, init?: RequestInit) => {
+    if ((init?.method ?? "GET") === "GET") return json([{ id: 1, user: botUser, body }]);
+    writes += 1;
+    body = z.object({ body: z.string() }).parse(JSON.parse(String(init?.body))).body;
+    return json({ id: 1, user: botUser, body });
+  } } });
+  await markInitialReviewRunning(octokit, context());
+  expect(decodeReviewState(body)).toMatchObject({
+    initialFullStatus: "running", publication: { blocking: true, profile: "thorough" },
+  });
+  await markInitialReviewRunning(octokit, context());
+  expect(writes).toBe(1);
+  const running = decodeReviewState(body);
+  if (!running) throw new Error("Expected running state");
+  body = encodeReviewState({ ...running, initialFullStatus: "completed", baseline: {
+    head: "head", patchFingerprint: "a".repeat(64), files: {},
+    findingsArtifactUrl: "https://github.com/acme/widget/runs/1", report: report(),
+  } });
+  await markInitialReviewRunning(octokit, context());
+  expect(decodeReviewState(body)?.baseline?.report).toEqual(report());
+  expect(writes).toBe(1);
+});
+
+test("oversized staged reports can be corrected without issuing a GitHub request", async () => {
+  const oversized = { ...report(), limitations: ["x".repeat(maxReviewStateBytes)] };
+  const identity = {
+    baseSha: "a".repeat(40), headSha: "b".repeat(40), patchFingerprint: "c".repeat(64),
+    executionRevision: "review-report-v2" as const, planKind: "full" as const,
+    repositoryId: "R_widget", pullRequest: 7,
+    baselineHead: null, reviewPaths: [], activeAxes: ["engineering-quality" as const],
+    selectedFindingIds: [],
+  };
+  const state = { ...beginReportAssembly(identity), report: oversized };
+  let requests = 0;
+  const octokit = new Octokit({ request: { fetch: async () => { requests += 1; return json([]); } } });
+  let failure: unknown;
+  try {
+    await writeReviewState(octokit, context(), {
+      schemaVersion: 2, app: "known-good-review", pullRequest: 7,
+      initialFullStatus: "running", baseline: null,
+      pendingPublication: { identity, report: oversized, stagedAt: oversized.generatedAt },
+      updatedAt: oversized.generatedAt,
+    });
+  } catch (error) { failure = error; }
+  expect(failure).toBeInstanceOf(ReviewReportValidationError);
+  expect(reportAssemblyFailure(state, failure).report).toBeNull();
+  expect(requests).toBe(0);
+});
 
 interface CapturedRequest {
   readonly body: unknown;
@@ -103,6 +199,106 @@ function report(): ReviewReport {
 }
 
 describe("GitHub publication lifecycle", () => {
+  test("requires every file identity before publishing any result", async () => {
+    const writes: string[] = [];
+    const octokit = new Octokit({ auth: "test-token", request: {
+      fetch: async (resource: Request | string | URL, init?: RequestInit) => {
+        const path = new URL(String(resource)).pathname;
+        const method = init?.method ?? "GET";
+        if (method !== "GET") writes.push(`${method} ${path}`);
+        if (path.endsWith("/pulls/7")) return json({ state: "open", draft: false, base: { sha: "base" }, head: { sha: "head" } });
+        if (path.endsWith("/files")) return json([{ filename: "src/a.ts", status: "modified" }]);
+        return json([]);
+      },
+    } });
+    await expect(publishReview({ context: context(), octokit, report: report(), reconcileFindings: false }))
+      .rejects.toThrow("did not return content identity");
+    expect(writes).toEqual([]);
+  });
+
+  test("rechecks the PR after file pagination and before saving its baseline", async () => {
+    for (const changedOnRead of [2, 3]) {
+      let headReads = 0;
+      const writes: string[] = [];
+      const octokit = new Octokit({ auth: "test-token", request: {
+        fetch: async (resource: Request | string | URL, init?: RequestInit) => {
+          const path = new URL(String(resource)).pathname;
+          const method = init?.method ?? "GET";
+          if (method !== "GET") writes.push(`${method} ${path}`);
+          if (path.endsWith("/pulls/7")) return json({
+            state: "open", draft: false, base: { sha: "base" },
+            head: { sha: ++headReads >= changedOnRead ? "new-head" : "head" },
+          });
+          if (path.endsWith("/files")) return json([]);
+          if (method === "GET" && path.endsWith("/check-runs")) return json({ check_runs: [] });
+          if (method === "POST" && path.endsWith("/check-runs")) return json({ id: 1, html_url: "https://github.com/acme/widget/runs/1" });
+          if (method === "GET" && path.endsWith("/issues/7/comments")) return json([]);
+          if (method === "POST" && path.endsWith("/issues/7/comments")) return json({ id: 401, user: botUser });
+          throw new Error(`Unexpected request: ${method} ${path}`);
+        },
+      } });
+      await expect(publishReview({ context: context(), octokit, report: report(), reconcileFindings: false }))
+        .rejects.toThrow("no longer matches the reviewable pull request");
+      expect(headReads).toBe(changedOnRead);
+      if (changedOnRead === 2) expect(writes).toEqual([]);
+      else {
+        expect(writes.length).toBeGreaterThan(0);
+        expect(writes.every((request) => request.endsWith("/check-runs"))).toBe(true);
+      }
+    }
+  });
+
+  test("rejects a stale or no longer reviewable PR before any publication write", async () => {
+    for (const current of [
+      { state: "open", draft: false, base: { sha: "base" }, head: { sha: "new-head" } },
+      { state: "open", draft: false, base: { sha: "new-base" }, head: { sha: "head" } },
+      { state: "open", draft: true, base: { sha: "base" }, head: { sha: "head" } },
+      { state: "closed", draft: false, base: { sha: "base" }, head: { sha: "head" } },
+    ]) {
+      const writes: string[] = [];
+      const octokit = new Octokit({ auth: "test-token", request: {
+        fetch: async (resource: Request | string | URL, init?: RequestInit) => {
+          const path = new URL(String(resource)).pathname;
+          const method = init?.method ?? "GET";
+          if (method !== "GET") writes.push(`${method} ${path}`);
+          if (path.endsWith("/pulls/7")) return json(current);
+          return json([]);
+        },
+      } });
+      await expect(publishReview({ context: context(), octokit, report: report() }))
+        .rejects.toThrow("no longer matches the reviewable pull request");
+      expect(writes).toEqual([]);
+    }
+  });
+
+  test("never reads or overwrites another author's copied state marker", async () => {
+    const state = {
+      schemaVersion: 2 as const,
+      app: "known-good-review" as const,
+      pullRequest: 7,
+      initialFullStatus: "running" as const,
+      baseline: null,
+      updatedAt: "2026-09-04T00:00:00.000Z",
+    };
+    const body = encodeReviewState(state);
+    const writes: string[] = [];
+    const octokit = new Octokit({
+      auth: "test-token",
+      request: { fetch: async (resource: Request | string | URL, init?: RequestInit) => {
+        const path = new URL(String(resource)).pathname;
+        const method = init?.method ?? "GET";
+        if (method === "GET") {
+          return json([{ id: 666, body, user: { login: "contributor", type: "User" } }]);
+        }
+        writes.push(`${method} ${path}`);
+        return json({ id: 401, body, user: botUser });
+      } },
+    });
+    expect(await readLatestReviewState(octokit, context())).toBeNull();
+    await writeReviewState(octokit, context(), state);
+    expect(writes).toEqual(["POST /repos/acme/widget/issues/7/comments"]);
+  });
+
   test("stages a validated current-head report without advancing the baseline", async () => {
     const requests: CapturedRequest[] = [];
     const publicationContext = {
@@ -156,7 +352,7 @@ describe("GitHub publication lifecycle", () => {
             path: url.pathname,
           });
           if (method === "GET" && url.pathname.endsWith("/issues/7/comments")) {
-            return json([{ id: 401, body: existingState }]);
+            return json([{ id: 401, user: botUser, body: existingState }]);
           }
           if (method === "PATCH" && url.pathname.endsWith("/issues/comments/401")) {
             return json({ id: 401, body });
@@ -169,7 +365,9 @@ describe("GitHub publication lifecycle", () => {
     await stageReviewPublication({
       context: publicationContext,
       identity: {
-        executionRevision: "review-report-v1",
+        executionRevision: "review-report-v2",
+          baselineHead,
+          reviewPaths: ["src/review.ts"],
         repositoryId: publicationContext.repositoryId,
         pullRequest: publicationContext.pullRequest,
         baseSha: publicationContext.baseSha,
@@ -255,7 +453,9 @@ describe("GitHub publication lifecycle", () => {
       },
       pendingPublication: {
         identity: {
-          executionRevision: "review-report-v1",
+          executionRevision: "review-report-v2",
+          baselineHead,
+          reviewPaths: ["src/review.ts"],
           repositoryId: failureContext.repositoryId,
           pullRequest: failureContext.pullRequest,
           baseSha: failureContext.baseSha,
@@ -291,7 +491,7 @@ describe("GitHub publication lifecycle", () => {
             });
           }
           if (method === "GET" && url.pathname.endsWith("/issues/7/comments")) {
-            return json([{ id: 401, body: existingState }]);
+            return json([{ id: 401, user: botUser, body: existingState }]);
           }
           if (method === "PATCH" && url.pathname.endsWith("/issues/comments/401")) {
             return json({ id: 401, body });
@@ -445,6 +645,9 @@ describe("GitHub publication lifecycle", () => {
               html_url: "https://github.com/acme/widget/runs/91",
             });
           }
+          if (method === "GET" && url.pathname.endsWith("/pulls/7")) {
+            return json({ state: "open", draft: false, base: { sha: "base" }, head: { sha: "head" } });
+          }
           if (method === "GET" && url.pathname.endsWith("/pulls/7/files")) {
             return json([
               {
@@ -456,7 +659,13 @@ describe("GitHub publication lifecycle", () => {
             ]);
           }
           if (method === "GET" && url.pathname.endsWith("/pulls/7/comments")) {
-            return json([]);
+            return json([{
+              id: 666,
+              user: { login: "contributor", type: "User" },
+              body: findingBody(report().findings[0]!),
+              path: "src/review.ts", line: 11, side: "RIGHT",
+              in_reply_to_id: null,
+            }]);
           }
           if (method === "GET" && url.pathname.endsWith("/pulls/7/reviews")) {
             return json([{ id: 77, state: "PENDING" }]);
@@ -491,7 +700,13 @@ describe("GitHub publication lifecycle", () => {
             return json([
               {
                 id: 88,
+                user: botUser,
                 body: "<!-- known-good-review:finding:CR-2 -->\nlegacy finding",
+              },
+              {
+                id: 666,
+                user: { login: "contributor", type: "User" },
+                body: "<!-- known-good-review:finding:CR-2 -->\ncopied marker",
               },
             ]);
           }
@@ -519,6 +734,7 @@ describe("GitHub publication lifecycle", () => {
       review: { kind: "full", reason: "manual" },
     });
     await publishReview({ context: context(), octokit, report: report() });
+    expect(requests.some((request) => request.path.endsWith("/666"))).toBeFalse();
 
     expect(
       requests.find(
@@ -612,6 +828,9 @@ describe("GitHub publication lifecycle", () => {
             path: url.pathname,
           });
 
+          if (method === "GET" && url.pathname.endsWith("/pulls/7")) {
+            return json({ state: "open", draft: false, base: { sha: "base" }, head: { sha: "head" } });
+          }
           if (method === "GET" && url.pathname.endsWith("/pulls/7/files")) {
             return json([
               {
@@ -686,6 +905,9 @@ describe("GitHub publication lifecycle", () => {
             method,
             path: url.pathname,
           });
+          if (method === "GET" && url.pathname.endsWith("/pulls/7")) {
+            return json({ state: "open", draft: false, base: { sha: "base" }, head: { sha: "head" } });
+          }
           if (method === "GET" && url.pathname.endsWith("/pulls/7/files")) {
             return json([{
               filename: "src/review.ts",
@@ -697,6 +919,7 @@ describe("GitHub publication lifecycle", () => {
           if (method === "GET" && url.pathname.endsWith("/pulls/7/comments")) {
             return json([{
               id: 201,
+              user: botUser,
               body: "<!-- known-good-review:finding:CR-1 -->\nold finding",
               path: "src/old.ts",
               line: 3,
@@ -819,6 +1042,9 @@ describe("GitHub publication lifecycle", () => {
             method,
             path: url.pathname,
           });
+          if (method === "GET" && url.pathname.endsWith("/pulls/7")) {
+            return json({ state: "open", draft: false, base: { sha: "base" }, head: { sha: "head" } });
+          }
           if (method === "GET" && url.pathname.endsWith("/pulls/7/files")) {
             return json([{
               filename: "src/review.ts",
@@ -830,6 +1056,7 @@ describe("GitHub publication lifecycle", () => {
           if (method === "GET" && url.pathname.endsWith("/pulls/7/comments")) {
             return json([{
               id: 201,
+              user: botUser,
               body: findingBody(fixed.findings[0]!),
               path: "src/review.ts",
               line: 11,

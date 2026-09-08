@@ -1,6 +1,6 @@
 "use node";
 
-import { RAG, type EntryId } from "@convex-dev/rag";
+import { RAG } from "@convex-dev/rag";
 import { gateway } from "@ai-sdk/gateway";
 import { embed } from "ai";
 import { createHash } from "node:crypto";
@@ -48,11 +48,6 @@ function ragFor(embedding: EmbeddingConfig) {
     textEmbeddingModel: gateway.embedding(embedding.model),
     embeddingDimension: embedding.dimension,
   });
-}
-
-function entryId(value: string): EntryId {
-  // Component identifiers are serialized as strings across the component API.
-  return value as EntryId;
 }
 
 function memoryKey(memory: NormalizedMemory): string {
@@ -121,11 +116,28 @@ export const ingestReview = internalAction({
       for (const memory of ingestion.memories) {
         const key = memoryKey(memory);
         const text = memoryText(memory);
-        const embedded = await embeddingForText(ingestion.embedding, text);
         const seed = await ctx.runQuery(internal.memoryData.memoryClusterSeed, {
           repositoryId: ingestion.repositoryId,
           memoryKey: key,
         });
+        if (seed.observedAt !== null && seed.observedAt > ingestion.publishedAt) continue;
+        const cached = await rag.findEntryByContentHash(ctx, {
+          namespace: repositoryNamespace(ingestion.repositoryId), key, contentHash: contentHash(text),
+        });
+        const cachedMetadata = memoryMetadataSchema.safeParse(cached?.metadata);
+        if (cached?.status === "ready" && cachedMetadata.success) {
+          await ctx.runMutation(internal.memoryData.recordMemory, {
+            memoryKey: key,
+            clusterKey: seed.existingClusterKey ?? cachedMetadata.data.clusterKey,
+            ingestionId: args.ingestionId,
+            ragEntryId: cached.entryId,
+            embedding: ingestion.embedding,
+            memory,
+            observedAt: ingestion.publishedAt,
+          });
+          continue;
+        }
+        const embedded = await embeddingForText(ingestion.embedding, text);
         let assignedClusterKey =
           seed.existingClusterKey ?? clusterKey(memory);
         if (!seed.existingClusterKey && seed.hasEntries) {
@@ -151,7 +163,7 @@ export const ingestReview = internalAction({
           key,
           title: memory.finding,
           chunks: [{ text, embedding: embedded.vector }],
-          contentHash: contentHash(JSON.stringify({ text, entryMetadata })),
+          contentHash: contentHash(text),
           metadata: entryMetadata,
           importance: 1,
         });
@@ -223,20 +235,16 @@ export const searchRepository = internalAction({
       limit: Math.min(32, Math.max(args.limit * 4, args.limit)),
       vectorScoreThreshold: 0.35,
     });
-    const parsedEntries = search.entries.flatMap((entry) => {
-      const parsed = memoryMetadataSchema.safeParse(entry.metadata);
-      return parsed.success ? [{ entry, metadata: parsed.data }] : [];
-    });
-    const clusterKeys = [...new Set(parsedEntries.map(({ metadata }) => metadata.clusterKey))];
-    const clusters: Doc<"memoryClusters">[] = await ctx.runQuery(
-      internal.memoryData.clustersByKeys,
+    // RAG owns text/vector identity. Application records own the latest outcome
+    // and provenance, which can change without re-embedding that text.
+    const candidates = await ctx.runQuery(
+      internal.memoryData.searchMemories,
       {
         repositoryId: args.repositoryId,
-        clusterKeys,
+        embedding: repository.activeEmbedding,
+        entries: search.entries.flatMap((entry) => entry.key
+          ? [{ memoryKey: entry.key, ragEntryId: entry.entryId }] : []),
       },
-    );
-    const clustersByKey = new Map<string, Doc<"memoryClusters">>(
-      clusters.map((cluster) => [cluster.clusterKey, cluster]),
     );
     const vectorScores = new Map<string, number>();
     for (const result of search.results) {
@@ -257,32 +265,29 @@ export const searchRepository = internalAction({
     const threshold = durableClusterPullRequestThreshold(
       repository.completedReviews,
     );
-    const ranked = parsedEntries
-      .flatMap(({ entry, metadata: candidate }) => {
-        const cluster = clustersByKey.get(candidate.clusterKey);
-        if (!cluster) return [];
+    const ranked = candidates
+      .map(({ ragEntryId, memory, cluster }) => {
+        const candidate = memoryMetadataSchema.parse(memory);
         const tier = memoryTier({
           observedAt: candidate.observedAt,
           stats,
           now,
         });
         const score =
-          (vectorScores.get(entry.entryId) ?? 0) *
+          (vectorScores.get(ragEntryId) ?? 0) *
           memoryWeight({
             distinctPullRequests: cluster.distinctPullRequests,
             severity: candidate.severity,
             status: candidate.outcome,
             tier,
           });
-        return [
-          {
+        return {
             ...candidate,
             tier,
             score,
             distinctPullRequests: cluster.distinctPullRequests,
             durable: cluster.distinctPullRequests >= threshold,
-          },
-        ];
+        };
       })
       .sort((left, right) => right.score - left.score);
     const clusterCounts = new Map<string, number>();
@@ -304,13 +309,13 @@ export const searchRepository = internalAction({
         axis: args.axis,
         model: repository.activeEmbedding.model,
         embeddingTokens: search.usage.tokens,
-        candidates: parsedEntries.length,
+        candidates: candidates.length,
         returned: memories.length,
       }),
     );
     return memorySearchResponseSchema.parse({
       mode: tieredMemoryIsActive(stats, now) ? "tiered" : "bootstrap",
-      policyHash: repository.policyHash,
+      policyHash: memoryPolicyHash(),
       memories,
       usage: { embeddingTokens: search.usage.tokens },
     });
@@ -319,27 +324,22 @@ export const searchRepository = internalAction({
 
 export const reembedRepository = internalAction({
   args: {
-    attempt: v.number(),
     repositoryId: v.string(),
-    cursor: v.union(v.string(), v.null()),
+    token: v.optional(v.string()),
+    // Accept already-scheduled calls from the previous deployment; their cursors
+    // are superseded when startReembed creates a durable job.
+    attempt: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    let attemptedEmbedding: EmbeddingConfig | null = null;
+    const repository = await ctx.runMutation(internal.memoryData.startReembed, {
+      repositoryId: args.repositoryId, ...(args.token ? { token: args.token } : {}),
+    });
+    const embedding = repository?.pendingEmbedding;
+    const job = repository?.reembedJob;
+    if (!repository || !embedding || !job) return null;
     try {
-      const repository = await ctx.runQuery(internal.memoryData.getRepository, {
-        repositoryId: args.repositoryId,
-      });
-      const embedding = repository?.pendingEmbedding;
-      if (!repository || !embedding) return null;
-      if (repository.deleting) {
-        await ctx.runMutation(
-          internal.memoryData.cancelReembedForDeletion,
-          { repositoryId: args.repositoryId, embedding },
-        );
-        return null;
-      }
-      attemptedEmbedding = embedding;
       const rag = ragFor(embedding);
       const namespace = await rag.getOrCreateNamespace(ctx, {
         namespace: repositoryNamespace(args.repositoryId),
@@ -347,7 +347,7 @@ export const reembedRepository = internalAction({
       });
       const page = await ctx.runQuery(internal.memoryData.listMemoryEntries, {
         repositoryId: args.repositoryId,
-        paginationOpts: { cursor: args.cursor, numItems: 20 },
+        paginationOpts: { cursor: job.cursor, numItems: 20 },
       });
       for (const entry of page.page) {
         const memory = normalizedMemorySchema.parse({
@@ -371,7 +371,7 @@ export const reembedRepository = internalAction({
           key: entry.memoryKey,
           title: memory.finding,
           chunks: [{ text, embedding: embedded.vector }],
-          contentHash: contentHash(JSON.stringify({ text, entryMetadata })),
+          contentHash: contentHash(text),
           metadata: entryMetadata,
           importance: 1,
         });
@@ -383,6 +383,7 @@ export const reembedRepository = internalAction({
         await ctx.runMutation(internal.memoryData.recordVectorCopy, {
           repositoryId: args.repositoryId,
           memoryKey: entry.memoryKey,
+          token: job.token,
           embedding,
           ragEntryId: ragEntry.entryId,
         });
@@ -396,110 +397,52 @@ export const reembedRepository = internalAction({
           }),
         );
       }
-      if (!page.isDone) {
-        await ctx.scheduler.runAfter(
-          0,
-          internal.memoryActions.reembedRepository,
-          {
-            attempt: 0,
-            repositoryId: args.repositoryId,
-            cursor: page.continueCursor,
-          },
-        );
-        return null;
-      }
-      await ctx.runMutation(components.rag.namespaces.promoteToReady, {
+      if (page.isDone) await ctx.runMutation(components.rag.namespaces.promoteToReady, {
         namespaceId: namespace.namespaceId,
       });
       await ctx.runMutation(internal.memoryData.completeReembed, {
-        repositoryId: args.repositoryId,
-        embedding,
+        repositoryId: args.repositoryId, token: job.token,
+        nextCursor: page.isDone ? null : page.continueCursor,
       });
     } catch (error) {
-      if (args.attempt < 4) {
-        await ctx.scheduler.runAfter(
-          Math.min(60_000, 2 ** args.attempt * 1_000),
-          internal.memoryActions.reembedRepository,
-          { ...args, attempt: args.attempt + 1 },
-        );
-      } else {
-        if (attemptedEmbedding) {
-          await ctx.runMutation(internal.memoryData.recordReembedFailure, {
-            repositoryId: args.repositoryId,
-            embedding: attemptedEmbedding,
-            failureCode: error instanceof Error ? error.name : "unknown",
-          });
-        }
-      }
+      await ctx.runMutation(internal.memoryData.recordReembedFailure, {
+        repositoryId: args.repositoryId, token: job.token,
+        failureCode: error instanceof Error ? error.name : "unknown",
+      });
     }
     return null;
   },
 });
 
 export const deleteRepository = internalAction({
-  args: { repositoryId: v.string() },
+  args: { repositoryId: v.string(), repositoryRecordId: v.optional(v.id("repositoryMemory")) },
   returns: v.null(),
-  handler: async (ctx, args) => {
+  handler: async (ctx, input) => {
+    const repositoryRecordId = await ctx.runMutation(internal.memoryData.resolveDeletion, input);
+    if (!repositoryRecordId) return null;
+    const args = { repositoryId: input.repositoryId, repositoryRecordId };
     try {
-      const processing = await ctx.runQuery(
-        internal.memoryData.repositoryHasActiveMemoryWork,
-        args,
-      );
+      const processing = await ctx.runMutation(internal.memoryData.repositoryHasActiveMemoryWork, { repositoryId: args.repositoryId });
       if (processing) {
-        await ctx.scheduler.runAfter(
-          1_000,
-          internal.memoryActions.deleteRepository,
-          args,
-        );
+        await ctx.scheduler.runAfter(1_000, internal.memoryActions.deleteRepository, args);
         return null;
       }
-      const vectors = await ctx.runQuery(
-        internal.memoryData.listRepositoryVectors,
-        args,
-      );
-      if (vectors.length > 0) {
-        for (const vector of vectors) {
-          await ragFor(
-            embeddingConfigSchema.parse({
-              model: vector.embeddingModel,
-              dimension: vector.embeddingDimension,
-            }),
-          ).delete(ctx, { entryId: entryId(vector.ragEntryId) });
-          await ctx.runMutation(internal.memoryData.deleteVectorRows, {
-            ids: [vector._id],
-          });
-        }
-        await ctx.scheduler.runAfter(
-          0,
-          internal.memoryActions.deleteRepository,
-          args,
-        );
-        return null;
+      const namespaces = await ctx.runQuery(internal.memoryData.listDeletionNamespaces, args);
+      if (namespaces === null) return null;
+      // Delete every namespace version, including entries whose writer failed
+      // between the RAG mutation and recording the application vector row.
+      for (const namespaceId of namespaces) {
+        await ctx.runAction(components.rag.namespaces.deleteNamespaceSync, { namespaceId });
       }
-      const complete = await ctx.runMutation(
-        internal.memoryData.deleteRepositoryRows,
-        args,
-      );
-      if (!complete) {
-        await ctx.scheduler.runAfter(
-          0,
-          internal.memoryActions.deleteRepository,
-          args,
-        );
+      if (namespaces.length > 0 || !await ctx.runMutation(internal.memoryData.deleteRepositoryRows, args)) {
+        await ctx.scheduler.runAfter(0, internal.memoryActions.deleteRepository, args);
       }
     } catch (error) {
-      console.error(
-        JSON.stringify({
-          event: "known-good-review.memory.deletion_retry",
-          repositoryId: args.repositoryId,
-          error: error instanceof Error ? error.name : "unknown",
-        }),
-      );
-      await ctx.scheduler.runAfter(
-        60_000,
-        internal.memoryActions.deleteRepository,
-        args,
-      );
+      console.error(JSON.stringify({
+        event: "known-good-review.memory.deletion_retry", repositoryId: args.repositoryId,
+        error: error instanceof Error ? error.name : "unknown",
+      }));
+      await ctx.scheduler.runAfter(60_000, internal.memoryActions.deleteRepository, args);
     }
     return null;
   },

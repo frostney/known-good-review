@@ -10,7 +10,18 @@ import { isReviewAxis, type ReviewAxis } from "../review/axes";
 
 export const routingAttribute = "known_good_review_config";
 const routingPattern =
-  /<known-good-review-routing>(\{[^<]+\})<\/known-good-review-routing>/g;
+  /^<known-good-review-routing>(\{[^<\n]+\})<\/known-good-review-routing>/;
+// Eve's built-in agent wraps the initial caller message before delivering it
+// to the model resolver. Match the complete wrapper, never an embedded marker.
+// The installed-SDK regression test guards this version-dependent boundary.
+const eveAgentCallerPrefix = [
+  'You are the subagent "agent".',
+  "",
+  "The caller delegated the following task to you. Complete it and return the result directly. The caller may send follow-up messages after you answer.",
+  "",
+  "Caller message:",
+  "",
+].join("\n");
 
 export type ReviewRoute =
   | { readonly role: "coordinator"; readonly attempt: number }
@@ -43,9 +54,14 @@ function parseAttempt(value: unknown): number {
 }
 
 export function parseSubagentRoute(messages: readonly ModelMessage[]): ReviewRoute {
-  const text = messages.map(textFromMessage).join("\n");
-  const matches = [...text.matchAll(routingPattern)];
-  const encoded = matches.at(-1)?.[1];
+  // Only the initial delegation owns routing. Later evidence and model output
+  // can contain copied envelopes and must never change the lane or its model.
+  const delegation = messages.find((message) => message.role === "user");
+  const text = delegation ? textFromMessage(delegation) : "";
+  const callerMessage = text.startsWith(eveAgentCallerPrefix)
+    ? text.slice(eveAgentCallerPrefix.length)
+    : text;
+  const encoded = routingPattern.exec(callerMessage)?.[1];
   if (!encoded) {
     throw new Error("Review subagent message is missing its routing envelope");
   }
@@ -92,6 +108,7 @@ export function chainForRoute(
 }
 
 export function selectRoutedModel(input: {
+  readonly route?: ReviewRoute;
   readonly attributes: Readonly<
     Record<string, string | readonly string[]>
   > | null;
@@ -116,18 +133,15 @@ export function selectRoutedModel(input: {
     typeof rawConfig === "string"
       ? parseReviewConfig(rawConfig)
       : parseReviewConfig(null);
-  const route: ReviewRoute =
+  const route: ReviewRoute = input.route ?? (
     input.channelKind === "subagent"
       ? parseSubagentRoute(input.messages)
-      : { role: "coordinator", attempt: 0 };
+      : { role: "coordinator", attempt: 0 });
   const chain = chainForRoute(config, route);
-  const model = chain[route.attempt];
-  if (model === undefined) {
-    throw new Error(
-      `Review model fallback attempt ${route.attempt} is outside the trusted chain`,
-    );
-  }
-  const fallbacks = chain.slice(route.attempt + 1);
+  // Attempts count fresh checkpoint continuations. Gateway owns failover
+  // within each invocation, independently of the number of evidence packets.
+  const model = chain[0];
+  const fallbacks = chain.slice(1);
   const gatewayOptions = {
     caching: "auto" as const,
     ...(fallbacks.length > 0 ? { models: fallbacks } : {}),

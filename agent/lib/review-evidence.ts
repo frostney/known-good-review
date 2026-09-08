@@ -28,7 +28,7 @@ export function currentReviewEvidenceIdentity(
   }
   const plan = planSchema.parse(JSON.parse(rawPlan));
   return {
-    executionRevision: "review-evidence-v2",
+    executionRevision: "review-evidence-v3",
     repositoryId: trusted.repositoryId,
     repositoryDatabaseId: trusted.repositoryDatabaseId,
     repository: trusted.repository,

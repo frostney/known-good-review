@@ -1,4 +1,5 @@
 import type { GitHubWebhookVerifier } from "eve/channels/github";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 const repositoryReferenceSchema = z.object({
@@ -79,11 +80,10 @@ export function parseGitHubLifecycleEvent(
 export async function handleGitHubLifecycleWebhook(input: {
   readonly request: Request;
   readonly verifier: GitHubWebhookVerifier;
-  readonly deleteRepositories: (repositoryIds: readonly string[]) => Promise<void>;
-  readonly reconcileInstallation: (
-    installationId: number,
-    retainedRepositoryIds: readonly string[],
-  ) => Promise<void>;
+  readonly deleteRepositories: (input: { installationId: number; repositoryIds: readonly string[]; deliveryId: string }) => Promise<void>;
+  readonly reconcileInstallation: (input: {
+    installationId: number; retainedRepositoryIds: readonly string[]; deliveryId: string; uninstalled: boolean;
+  }) => Promise<void>;
   readonly listAccessibleRepositories: (
     installationId: number,
   ) => Promise<readonly string[]>;
@@ -109,16 +109,23 @@ export async function handleGitHubLifecycleWebhook(input: {
     );
   }
 
+  const nativeDeliveryId = input.request.headers.get("x-github-delivery")?.trim();
+  if (nativeDeliveryId && nativeDeliveryId.length > 200) return Response.json({ error: "invalid delivery identity", ok: false }, { status: 400 });
+  // Connect-forwarded requests can omit native headers, as supported by Eve.
+  // A local job ID binds their paged cleanup; current access is rechecked below.
+  const deliveryId = nativeDeliveryId || `forwarded:${randomUUID()}`;
   try {
     if (event.kind === "installation-deleted") {
-      await input.reconcileInstallation(event.installationId, []);
-    } else if (event.repositoryIds.length > 0) {
-      await input.deleteRepositories(event.repositoryIds);
+      await input.reconcileInstallation({ installationId: event.installationId, retainedRepositoryIds: [], deliveryId, uninstalled: true });
     } else {
-      const retained = await input.listAccessibleRepositories(
-        event.installationId,
-      );
-      await input.reconcileInstallation(event.installationId, unique(retained));
+      const retained = unique(await input.listAccessibleRepositories(event.installationId));
+      if (event.repositoryIds.length > 0) {
+        const accessible = new Set(retained);
+        const removed = event.repositoryIds.filter((id) => !accessible.has(id));
+        if (removed.length) await input.deleteRepositories({ installationId: event.installationId, repositoryIds: removed, deliveryId });
+      } else {
+        await input.reconcileInstallation({ installationId: event.installationId, retainedRepositoryIds: retained, deliveryId, uninstalled: false });
+      }
     }
   } catch (error) {
     console.error(

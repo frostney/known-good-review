@@ -42,6 +42,7 @@ export const normalizedMemorySchema = z.object({
 
 export const memoryIngestionSchema = z.object({
   idempotencyKey: z.string().regex(/^[a-f0-9]{64}$/),
+  memoryAdmission: z.string().min(1).nullable(),
   installationId: z.number().int().positive(),
   repositoryId: z.string().min(1),
   repository: z.string().min(3),
@@ -81,13 +82,26 @@ export const memorySearchResponseSchema = z.object({
 
 const repositoryIdsSchema = z.array(z.string().min(1));
 
+export const memoryAdmissionRequestSchema = z.object({
+  installationId: z.number().int().positive(),
+  repositoryId: z.string().min(1),
+});
+
+export const memoryAdmissionResponseSchema = z.object({
+  receipt: z.string().min(1).nullable(),
+});
+
 export const memoryDeletionSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("repositories"),
+    installationId: z.number().int().positive(),
+    deliveryId: z.string().min(1).max(200),
     repositoryIds: repositoryIdsSchema.min(1),
   }),
   z.object({
     kind: z.literal("installation"),
+    deliveryId: z.string().min(1).max(200),
+    uninstalled: z.boolean(),
     installationId: z.number().int().positive(),
     retainedRepositoryIds: repositoryIdsSchema,
   }),

@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test";
-import { GatewayNotFoundError, GatewayResponseError } from "@ai-sdk/gateway";
+import { describe, expect, spyOn, test } from "bun:test";
+import usageCapture from "./fixtures/pr65-telemetry-usage.json";
+import { createGateway, GatewayNotFoundError, GatewayResponseError } from "@ai-sdk/gateway";
 import {
   enqueuePendingGatewayTelemetry,
   reconcileGatewayTelemetry,
@@ -26,6 +27,49 @@ const observation: PendingGatewayTelemetry = {
 };
 
 describe("Gateway telemetry reconciliation", () => {
+  test("bounds the installed Gateway lookup and retains a stalled record", async () => {
+    const priorKey = process.env.AI_GATEWAY_API_KEY;
+    process.env.AI_GATEWAY_API_KEY = "offline-telemetry-fixture";
+    const timeout = AbortSignal.timeout.bind(AbortSignal);
+    const deadlines = spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+      expect(ms).toBe(5_000);
+      return timeout(30);
+    });
+    let aborted = false;
+    const network = spyOn(globalThis, "fetch").mockImplementation(Object.assign(async (_resource: unknown, init?: RequestInit) => {
+      if (!init?.signal) throw new Error("Missing request deadline");
+      return new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => { aborted = true; reject(init.signal?.reason); }, { once: true });
+      });
+    }, { preconnect: () => {} }));
+    try {
+      const result = await reconcileGatewayTelemetry({ pending: [observation], retryDelaysMs: [0] });
+      expect(aborted).toBe(true);
+      expect(result.pending).toEqual([observation]);
+      expect(result.resolved).toEqual([]);
+      expect(result.diagnostics).toHaveLength(1);
+    } finally {
+      deadlines.mockRestore(); network.mockRestore();
+      if (priorKey === undefined) delete process.env.AI_GATEWAY_API_KEY;
+      else process.env.AI_GATEWAY_API_KEY = priorKey;
+    }
+  });
+
+  test("retries a delayed record represented by the SDK response error", async () => {
+    let attempts = 0;
+    const result = await reconcileGatewayTelemetry({
+      pending: [observation],
+      retryDelaysMs: [0, 0],
+      getGenerationInfo: async () => {
+        attempts += 1;
+        throw new GatewayResponseError({ statusCode: 404 });
+      },
+    });
+    expect(attempts).toBe(2);
+    expect(result.diagnostics[0]).toMatchObject({ retryable: true, attempts: 2 });
+    expect(result.pending).toEqual([observation]);
+  });
+
   test("enriches a generation that becomes available after the first lookup", async () => {
     let attempts = 0;
     const result = await reconcileGatewayTelemetry({
@@ -67,10 +111,8 @@ describe("Gateway telemetry reconciliation", () => {
         ...observation,
         actualModel: "openai/gpt-5.6-sol",
         provider: "bedrock",
-        inputTokens: 11,
-        outputTokens: 3,
-        cacheReadTokens: 5,
-        cacheWriteTokens: 2,
+        sdkCostUsd: 0.01,
+        gatewayNativeUsage: { promptTokens: 11, completionTokens: 3, reasoningTokens: 0, cachedTokens: 5, cacheCreationTokens: 2 },
         costUsd: 0.02,
         durationMs: 1_110,
         latencyMs: 120,
@@ -78,10 +120,60 @@ describe("Gateway telemetry reconciliation", () => {
     ]);
   });
 
+  test("retries the generation endpoint's production 404 response shape", async () => {
+    let attempts = 0;
+    const gateway = createGateway({
+      apiKey: "test-key",
+      baseURL: "https://gateway.test/v4/ai",
+      fetch: Object.assign(
+        async () => {
+          attempts += 1;
+          if (attempts === 1) {
+            return Response.json({}, { status: 404 });
+          }
+          return Response.json({
+            data: {
+              id: "gen_one",
+              total_cost: 0.02,
+              upstream_inference_cost: 0.02,
+              usage: 0.02,
+              created_at: "2026-08-26T12:30:39.000Z",
+              model: "openai/gpt-5.6-sol",
+              is_byok: false,
+              provider_name: "bedrock",
+              streamed: true,
+              finish_reason: "stop",
+              latency: 120,
+              generation_time: 1_110,
+              native_tokens_prompt: 11,
+              native_tokens_completion: 3,
+              native_tokens_reasoning: 0,
+              native_tokens_cached: 5,
+              native_tokens_cache_creation: 2,
+              billable_web_search_calls: 0,
+            },
+          });
+        },
+        { preconnect() {} },
+      ),
+    });
+    const result = await reconcileGatewayTelemetry({
+      pending: [observation],
+      retryDelaysMs: [0, 0],
+      getGenerationInfo: (generationId) =>
+        gateway.getGenerationInfo({ id: generationId }),
+    });
+
+    expect(attempts).toBe(2);
+    expect(result.pending).toEqual([]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.resolved).toHaveLength(1);
+  });
+
   test("deduplicates at-least-once hook delivery by stable generation identity", () => {
-    expect(enqueuePendingGatewayTelemetry([observation], observation)).toEqual([
-      observation,
-    ]);
+    expect(enqueuePendingGatewayTelemetry([observation], {
+      ...observation, eventId: "new-event-envelope",
+    })).toEqual([observation]);
     expect(() =>
       enqueuePendingGatewayTelemetry([observation], {
         ...observation,
@@ -206,4 +298,43 @@ describe("Gateway telemetry reconciliation", () => {
     expect(result.diagnostics[0]?.retryable).toBe(false);
     expect(result.diagnostics[0]).not.toHaveProperty("response");
   });
+});
+
+test("preserves all recorded PR65 SDK usage and exact Gateway accounting categories", async () => {
+  const pending = usageCapture.steps.map(step => ({
+    ...observation, ...step.usage, generationId: step.generationId,
+    stepIndex: step.stepIndex, turnId: step.turnId,
+  }));
+  const result = await reconcileGatewayTelemetry({
+    pending, retryDelaysMs: [0],
+    getGenerationInfo: id => {
+      const native = usageCapture.native.find(generation => generation.id === id);
+      if (!native) throw new Error("Missing recorded generation");
+      // Replay the real native response through the installed SDK parser.
+      const gateway = createGateway({
+        apiKey: "offline-capture", baseURL: "https://gateway.test/v4/ai",
+        fetch: Object.assign(async () => Response.json({ data: native }), { preconnect() {} }),
+      });
+      return gateway.getGenerationInfo({ id });
+    },
+  });
+  expect(result.pending).toEqual([]);
+  expect(result.resolved).toHaveLength(5);
+  for (const [index, resolved] of result.resolved.entries()) {
+    const recorded = usageCapture.steps[index];
+    const native = usageCapture.native[index];
+    expect(resolved).toMatchObject({
+      ...recorded?.usage,
+      sdkCostUsd: recorded?.usage.costUsd,
+      costUsd: native?.total_cost,
+      gatewayNativeUsage: {
+        promptTokens: native?.native_tokens_prompt,
+        completionTokens: native?.native_tokens_completion,
+        reasoningTokens: native?.native_tokens_reasoning,
+        cachedTokens: native?.native_tokens_cached,
+        cacheCreationTokens: native?.native_tokens_cache_creation,
+      },
+    });
+  }
+  expect(result.resolved.reduce((sum, entry) => sum + (entry.costUsd ?? 0), 0)).toBeCloseTo(0.0743096, 10);
 });

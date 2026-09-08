@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isReviewBotComment } from "./comment-identity";
 import {
   changedEffectiveFiles,
   effectivePatchFileFingerprints,
@@ -28,10 +29,17 @@ const pullRequestFileSchema = z.object({
   sha: z.string().min(1),
   status: z.string(),
   patch: z.string().optional(),
+  additions: z.number().int().nonnegative().optional(),
+  deletions: z.number().int().nonnegative().optional(),
 });
 
 const issueCommentSchema = z.object({
   body: z.string().nullable().optional(),
+  user: z.object({
+    id: z.number().optional(),
+    login: z.string().optional(),
+    type: z.string().optional(),
+  }).nullable().optional(),
 });
 
 export function parsePullRequestFiles(value: unknown): PatchFile[] {
@@ -50,6 +58,8 @@ export function parsePullRequestFiles(value: unknown): PatchFile[] {
               ? "copied"
               : "modified",
     patch: file.patch ?? null,
+    ...(file.additions === undefined ? {} : { additions: file.additions }),
+    ...(file.deletions === undefined ? {} : { deletions: file.deletions }),
   }));
 }
 
@@ -57,7 +67,7 @@ export function reviewStateFromComments(value: unknown):
   | { readonly kind: "absent" }
   | { readonly kind: "lost" }
   | { readonly kind: "valid"; readonly state: ReviewState } {
-  const comments = z.array(issueCommentSchema).parse(value);
+  const comments = z.array(issueCommentSchema).parse(value).filter(isReviewBotComment);
   const stateComments = comments.filter((comment) =>
     isReviewStateComment(comment.body ?? ""),
   );
@@ -67,8 +77,9 @@ export function reviewStateFromComments(value: unknown):
     );
     return hasFindingEvidence ? { kind: "lost" } : { kind: "absent" };
   }
+  const bodies = comments.map((comment) => comment.body ?? "");
   const decoded = stateComments
-    .map((comment) => decodeReviewState(comment.body ?? ""))
+    .map((comment) => decodeReviewState(comment.body ?? "", bodies))
     .filter((state): state is ReviewState => state !== null)
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
   return decoded ? { kind: "valid", state: decoded } : { kind: "lost" };

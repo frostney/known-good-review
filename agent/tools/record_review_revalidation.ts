@@ -1,5 +1,6 @@
 import { defineTool, toolOutput } from "eve/tools";
 import { z } from "zod";
+import { reviewFindingSchema } from "../../src/review/findings";
 import {
   currentReviewReportState,
   reviewReportState,
@@ -16,7 +17,7 @@ import {
 
 export const recordReviewRevalidationInputSchema = z
   .object({
-    findings: z.unknown(),
+    findings: z.array(reviewFindingSchema).max(100),
   })
   .strict();
 

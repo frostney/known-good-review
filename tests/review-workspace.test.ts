@@ -47,6 +47,9 @@ function sandbox(options: { readonly fetchExitCode?: number } = {}) {
         if (command.includes("refs/known-good-review/head^{commit}")) {
           return { exitCode: 0, stdout: `${headSha}\n`, stderr: "" };
         }
+        if (command.includes("refs/known-good-review/merge-base^{commit}")) {
+          return { exitCode: 0, stdout: `${baseSha}\n`, stderr: "" };
+        }
         return { exitCode: 0, stdout: "", stderr: "" };
       },
       async setNetworkPolicy(policy: SandboxNetworkPolicy) {
@@ -57,9 +60,21 @@ function sandbox(options: { readonly fetchExitCode?: number } = {}) {
 }
 
 describe("review workspace preparation", () => {
+  test("rejects an invalid merge base before changing the sandbox", async () => {
+    const observed = sandbox();
+    await expect(prepareReviewWorkspace(context, observed.runtime, {
+      getMergeBase: async () => "not-a-revision",
+      getInstallationToken: async () => { throw new Error("must not request credentials"); },
+    })).rejects.toThrow();
+    expect(observed.commands).toEqual([]);
+    expect(observed.policies).toEqual([]);
+    expect(observed.removed).toEqual([]);
+  });
+
   test("fetches and checks out the exact pull request without exposing its token", async () => {
     const observed = sandbox();
     await prepareReviewWorkspace(context, observed.runtime, {
+      getMergeBase: async () => baseSha,
       getInstallationToken: async (installationId) => {
         expect(installationId).toBe(41);
         return "secret-installation-token";
@@ -82,6 +97,7 @@ describe("review workspace preparation", () => {
       ),
       expect.stringContaining("refs/known-good-review/base^{commit}"),
       expect.stringContaining("refs/known-good-review/head^{commit}"),
+      expect.stringContaining("refs/known-good-review/merge-base^{commit}"),
       expect.stringContaining("checkout --detach --force"),
       expect.stringContaining("clean -ffd"),
     ]);
@@ -91,6 +107,7 @@ describe("review workspace preparation", () => {
     const observed = sandbox({ fetchExitCode: 1 });
     await expect(
       prepareReviewWorkspace(context, observed.runtime, {
+        getMergeBase: async () => baseSha,
         getInstallationToken: async () => "secret-installation-token",
       }),
     ).rejects.toThrow("Trusted pull request fetch failed");

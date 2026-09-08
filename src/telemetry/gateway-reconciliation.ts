@@ -1,10 +1,18 @@
 import {
   GatewayNotFoundError,
   GatewayResponseError,
+  createGateway,
   type GatewayGenerationInfo,
 } from "@ai-sdk/gateway";
 
 const defaultRetryDelaysMs = [0, 100, 250, 500, 1_000] as const;
+const telemetryGateway = createGateway({
+  fetch: Object.assign(
+    (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
+      fetch(input, { ...init, signal: AbortSignal.timeout(5_000) }),
+    { preconnect: fetch.preconnect },
+  ),
+});
 
 export interface PendingGatewayTelemetry {
   readonly eventId: string;
@@ -18,14 +26,22 @@ export interface PendingGatewayTelemetry {
   readonly attempt: number;
   readonly memoryPolicyHash: string;
   readonly requestedModel: string;
-  readonly inputTokens: number;
-  readonly outputTokens: number;
-  readonly cacheReadTokens: number;
-  readonly cacheWriteTokens: number;
-  readonly costUsd: number;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  readonly cacheReadTokens: number | null;
+  readonly cacheWriteTokens: number | null;
+  readonly costUsd: number | null;
 }
 
 export interface ReconciledGatewayTelemetry extends PendingGatewayTelemetry {
+  readonly sdkCostUsd: number | null;
+  readonly gatewayNativeUsage: {
+    readonly promptTokens: number;
+    readonly completionTokens: number;
+    readonly reasoningTokens: number;
+    readonly cachedTokens: number;
+    readonly cacheCreationTokens: number;
+  };
   readonly actualModel: string;
   readonly provider: string;
   readonly durationMs: number;
@@ -78,7 +94,8 @@ export function enqueuePendingGatewayTelemetry(
     (candidate) => gatewayTelemetryIdentity(candidate) === identity,
   );
   if (!existing) return [...current, observation];
-  if (JSON.stringify(existing) !== JSON.stringify(observation)) {
+  // The stable generation identity can arrive in a fresh event envelope.
+  if (JSON.stringify({ ...existing, eventId: observation.eventId }) !== JSON.stringify(observation)) {
     throw new Error("Conflicting Gateway telemetry shares one stable identity");
   }
   return current;
@@ -135,7 +152,9 @@ function validationIssues(
 
 function isRetryableLookup(error: unknown): boolean {
   if (GatewayNotFoundError.isInstance(error)) return true;
-  if (GatewayResponseError.isInstance(error)) return error.isRetryable;
+  if (GatewayResponseError.isInstance(error)) {
+    return error.statusCode === 404 || error.isRetryable;
+  }
   const code = statusCode(error);
   return (
     code === 404 ||
@@ -170,10 +189,16 @@ function enriched(
     ...observation,
     actualModel: generation.model,
     provider: generation.providerName,
-    inputTokens: generation.promptTokens,
-    outputTokens: generation.completionTokens,
-    cacheReadTokens: generation.cachedTokens,
-    cacheWriteTokens: generation.cacheCreationTokens,
+    // Native Gateway categories need not have SDK total-token semantics.
+    // Preserve both observations instead of replacing cache-inclusive SDK usage.
+    sdkCostUsd: observation.costUsd,
+    gatewayNativeUsage: {
+      promptTokens: generation.promptTokens,
+      completionTokens: generation.completionTokens,
+      reasoningTokens: generation.reasoningTokens,
+      cachedTokens: generation.cachedTokens,
+      cacheCreationTokens: generation.cacheCreationTokens,
+    },
     costUsd: generation.totalCost,
     durationMs: generation.generationTime,
     latencyMs: generation.latency,
@@ -182,7 +207,7 @@ function enriched(
 
 export async function reconcileGatewayTelemetry(input: {
   readonly pending: readonly PendingGatewayTelemetry[];
-  readonly getGenerationInfo: (
+  readonly getGenerationInfo?: (
     generationId: string,
   ) => Promise<GatewayGenerationInfo>;
   readonly retryDelaysMs?: readonly number[];
@@ -197,6 +222,7 @@ export async function reconcileGatewayTelemetry(input: {
     throw new Error("Gateway telemetry reconciliation needs an attempt");
   }
   const wait = input.wait ?? sleep;
+  const getGenerationInfo = input.getGenerationInfo ?? ((id: string) => telemetryGateway.getGenerationInfo({ id }));
   const resolved: ReconciledGatewayTelemetry[] = [];
   const terminalFailures: FailedLookup[] = [];
   let retryablePending = [...input.pending];
@@ -214,7 +240,7 @@ export async function reconcileGatewayTelemetry(input: {
     const results = await Promise.all(
       retryablePending.map(async (observation) => {
         try {
-          const generation = await input.getGenerationInfo(
+          const generation = await getGenerationInfo(
             observation.generationId,
           );
           return { kind: "resolved" as const, observation, generation };

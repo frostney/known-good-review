@@ -11,6 +11,8 @@
     "skipLibCheck": true,
     "noEmit": true,
     "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "useUnknownInCatchVariables": true
   },
   "include": ["agent/**/*.ts", "scripts/**/*.ts", "src/**/*.ts", "tests/**/*.ts"]

@@ -1,3 +1,4 @@
+import { getReviewEvidenceSandbox } from "../lib/evidence-sandbox";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { reviewAxes } from "../../src/review/axes";
@@ -12,7 +13,7 @@ export default defineTool({
   }),
   async execute(_input, ctx) {
     const ledger = await readReviewEvidenceLedger(
-      await ctx.getSandbox(),
+      await getReviewEvidenceSandbox(ctx),
       currentReviewEvidenceIdentity(ctx.session.auth.current),
     );
     return ledger.commonWork.memory;

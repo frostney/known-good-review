@@ -19,11 +19,17 @@ const catalogTtlMs = 5 * 60 * 1_000;
 let cachedCatalog:
   | { readonly expiresAt: number; readonly models: ReadonlyMap<string, CatalogModel> }
   | undefined;
+let loadingCatalog: Promise<ReadonlyMap<string, CatalogModel>> | undefined;
 
 async function gatewayModels(): Promise<ReadonlyMap<string, CatalogModel>> {
   if (cachedCatalog && cachedCatalog.expiresAt > Date.now()) {
     return cachedCatalog.models;
   }
+  loadingCatalog ??= fetchGatewayModels().finally(() => { loadingCatalog = undefined; });
+  return loadingCatalog;
+}
+
+async function fetchGatewayModels(): Promise<ReadonlyMap<string, CatalogModel>> {
   const response = await fetch(catalogUrl, {
     headers: { accept: "application/json" },
     signal: AbortSignal.timeout(5_000),

@@ -5,6 +5,7 @@ import {
   type ReviewEvidenceManifest,
 } from "./evidence-bundle";
 import type { ReviewAxis } from "./axes";
+import { readLaneCheckpoint, validateLaneCheckpointCoverage } from "./lane-checkpoint";
 import {
   readReviewEvidenceLedger,
   validatePreparedArtifactArchives,
@@ -30,11 +31,25 @@ export async function readLaneReviewEvidencePacket(
     manifest,
   });
   await validatePreparedArtifactArchives(sandbox, ledger);
+  const checkpoint = await readLaneCheckpoint(
+    sandbox,
+    {
+      baseSha: identity.baseSha,
+      headSha: identity.headSha,
+      patchFingerprint: identity.patchFingerprint,
+      evidenceDigest: ledger.digest,
+    },
+    axis,
+  );
+  if (checkpoint) {
+    validateLaneCheckpointCoverage(checkpoint, manifest.entries.length);
+  }
   const packet = await readNextReviewEvidencePacket(
     sandbox,
     manifest,
     axis,
     sessionId,
+    checkpoint?.revision ?? 0,
   );
   return {
     ledgerDigest: ledger.digest,

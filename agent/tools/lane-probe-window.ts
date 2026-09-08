@@ -6,7 +6,7 @@ import {
   reviewLaneProbeWindowClosed,
 } from "../../src/review/probe-window";
 import { reviewContextAttributes } from "../../src/github/trusted-context";
-import { parseSubagentRoute } from "../../src/models/routing";
+import { currentReviewRoute } from "../lib/review-route";
 
 const blockedInputSchema = z.record(z.string(), z.unknown());
 const blockedDescription =
@@ -68,7 +68,7 @@ export default defineDynamic({
       }
       if (ctx.channel.kind !== "subagent") return null;
       try {
-        if (parseSubagentRoute(ctx.messages).role !== "lane") return null;
+        if (currentReviewRoute(ctx.channel.kind, ctx.messages).role !== "lane") return null;
       } catch {
         return null;
       }

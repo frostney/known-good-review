@@ -1,4 +1,5 @@
 import { defineInstrumentation } from "eve/instrumentation";
+import { reviewRouteState } from "./lib/review-route";
 import { parseReviewConfig } from "../src/config/review-config";
 import {
   chainForRoute,
@@ -21,15 +22,15 @@ export default defineInstrumentation({
       );
       const route: ReviewRoute =
         input.channel.kind === "subagent"
-          ? parseSubagentRoute(input.modelInput.messages)
+          ? reviewRouteState.get() ?? parseSubagentRoute(input.modelInput.messages)
           : { role: "coordinator", attempt: 0 };
       const chain = chainForRoute(config, route);
       return {
         runtimeContext: {
           "review.role": route.role,
           "review.axis": route.role === "lane" ? route.axis : route.role,
-          "review.requested_model": chain[route.attempt] ?? chain[0],
-          "review.fallback_models": chain.slice(route.attempt + 1),
+          "review.requested_model": chain[0],
+          "review.fallback_models": chain.slice(1),
         },
       };
     },
