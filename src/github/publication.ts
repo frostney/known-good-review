@@ -1,8 +1,11 @@
 import type { Octokit } from "@octokit/rest";
+import { isReviewBotComment } from "./comment-identity";
+import { parsePullRequestFiles } from "./inbound";
 import type { ReviewConfig } from "../config/review-config";
 import {
   decodeReviewState,
-  encodeReviewState,
+  prepareReviewStateComments,
+  reviewStateCommentLimit,
   isReviewStateComment,
   type ReviewState,
 } from "./review-state";
@@ -12,10 +15,7 @@ import {
   type ReviewFinding,
   type ReviewReport,
 } from "../review/findings";
-import {
-  effectivePatchFileFingerprints,
-  type PatchFile,
-} from "../review/effective-patch";
+import { effectivePatchFileFingerprints } from "../review/effective-patch";
 import {
   findingBody,
   publishedFindings,
@@ -26,16 +26,27 @@ import { findingIdentity } from "../review/finding-identity";
 import type { ReviewFailureEnvelope } from "../review/recovery";
 import {
   reportAssemblyIdentitySchema,
+  ReviewReportValidationError,
   type ReportAssemblyIdentity,
 } from "../review/report-assembly";
 
 export { findingBody } from "./review-presentation";
 
+function validateFindingPresentation(report: ReviewReport): void {
+  const oversized = report.findings.findIndex((finding) =>
+    Buffer.byteLength(findingBody(finding, "file"), "utf8") > reviewStateCommentLimit);
+  if (oversized >= 0) {
+    throw new ReviewReportValidationError(
+      [{ code: "too_big", path: ["findings", oversized] }],
+      "An inline finding exceeds GitHub comment storage; shorten its text before retrying",
+    );
+  }
+}
+
 export const checkName = "known-good-review";
 export function axisCheckName(axis: ReviewAxis): string {
   return `${checkName} / ${axis}`;
 }
-const findingMarkerPrefix = "known-good-review:finding:";
 
 export type ActiveReviewIdentity =
   | { readonly kind: "delta" }
@@ -268,7 +279,15 @@ async function upsertCheck(
         : config.blocking && hasBlockingFinding(report)
         ? "known-good-review: changes requested"
         : "known-good-review: review complete",
-      summary: checkSummary(report, config).slice(0, 65_535),
+      summary: (forcedConclusion === "action_required"
+        ? [
+          "Policy result: **REVIEW INCOMPLETE**",
+          "",
+          "No review verdict was published.",
+          "",
+          ...report.limitations,
+        ].join("\n")
+        : checkSummary(report, config)).slice(0, 65_535),
     },
   };
   if (existing) {
@@ -718,12 +737,12 @@ async function reconcileFindingComments(
   config: Pick<ReviewConfig, "blocking" | "profile">,
   files: readonly PullRequestFileForComment[],
 ): Promise<() => Promise<void>> {
-  const comments = await octokit.paginate(octokit.rest.pulls.listReviewComments, {
+  const comments = (await octokit.paginate(octokit.rest.pulls.listReviewComments, {
     owner: context.owner,
     repo: context.repo,
     pull_number: context.pullRequest,
     per_page: 100,
-  });
+  })).filter(isReviewBotComment);
   const rootsByIdentity = new Map<string, typeof comments>();
   const markerByIdentity = new Map<string, FindingMarker>();
   for (const comment of comments) {
@@ -851,6 +870,7 @@ async function retireTimelineFindingComments(
   });
   const active = new Set(findings.map((finding) => finding.id));
   for (const comment of comments) {
+    if (!isReviewBotComment(comment)) continue;
     const id = timelineMarkerId(comment.body);
     if (!id) continue;
     const body = active.has(id)
@@ -872,6 +892,8 @@ export async function writeReviewState(
   context: TrustedGitHubContext,
   state: ReviewState,
 ): Promise<void> {
+  if (state.pullRequest !== context.pullRequest) throw new Error("Review state belongs to another pull request");
+  const { body, parts } = prepareReviewStateComments(state);
   const comments = await octokit.paginate(octokit.rest.issues.listComments, {
     owner: context.owner,
     repo: context.repo,
@@ -879,13 +901,14 @@ export async function writeReviewState(
     per_page: 100,
   });
   const existing = comments.find((comment) =>
-    comment.body?.includes("<!-- known-good-review:state\n"),
+    isReviewBotComment(comment) && isReviewStateComment(comment.body ?? ""),
   );
-  const body = encodeReviewState(state);
-  if (body.length > 65_000) {
-    throw new Error(
-      "The v2 findings artifact exceeds GitHub comment storage; the review was not published",
-    );
+  const storedParts = new Set(comments.filter(isReviewBotComment).map((comment) => comment.body));
+  for (const part of parts) {
+    if (storedParts.has(part)) continue;
+    await octokit.rest.issues.createComment({
+      owner: context.owner, repo: context.repo, issue_number: context.pullRequest, body: part,
+    });
   }
   if (existing) {
     await octokit.rest.issues.updateComment({
@@ -914,10 +937,12 @@ export async function readLatestReviewState(
     issue_number: context.pullRequest,
     per_page: 100,
   });
+  const trustedComments = comments.filter(isReviewBotComment);
+  const bodies = trustedComments.map((comment) => comment.body ?? "");
   return (
-    comments
+    trustedComments
       .filter((comment) => isReviewStateComment(comment.body ?? ""))
-      .map((comment) => decodeReviewState(comment.body ?? ""))
+      .map((comment) => decodeReviewState(comment.body ?? "", bodies))
       .filter(
         (state): state is ReviewState =>
           state !== null && state.pullRequest === context.pullRequest,
@@ -925,6 +950,20 @@ export async function readLatestReviewState(
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] ??
     null
   );
+}
+
+export async function markInitialReviewRunning(
+  octokit: OctokitClient,
+  context: TrustedGitHubContext,
+): Promise<void> {
+  const state = await readLatestReviewState(octokit, context);
+  if (!state) throw new Error("Initial review state is missing");
+  if (state.initialFullStatus !== "debouncing" || state.baseline || state.pendingPublication) return;
+  await writeReviewState(octokit, context, {
+    ...state,
+    initialFullStatus: "running",
+    updatedAt: new Date().toISOString(),
+  });
 }
 
 export function validateReportPublicationIdentity(
@@ -978,6 +1017,7 @@ export async function stageReviewPublication(input: {
     input.identity,
   );
   const report = reviewReportSchema.parse(input.report);
+  validateFindingPresentation(report);
   if (
     report.scope.base !== identity.baseSha ||
     report.scope.head !== identity.headSha
@@ -1063,6 +1103,23 @@ export async function writeReviewFailureState(input: {
   });
 }
 
+async function verifyPublicationHead(
+  octokit: OctokitClient,
+  context: TrustedGitHubContext,
+): Promise<void> {
+  const { data: current } = await octokit.rest.pulls.get({
+    owner: context.owner,
+    repo: context.repo,
+    pull_number: context.pullRequest,
+  });
+  if (
+    current.state !== "open" || current.draft ||
+    current.base.sha !== context.baseSha || current.head.sha !== context.headSha
+  ) {
+    throw new Error("Publication no longer matches the reviewable pull request");
+  }
+}
+
 export async function publishReview(input: {
   readonly config?: Pick<ReviewConfig, "blocking" | "profile">;
   readonly context: TrustedGitHubContext;
@@ -1070,11 +1127,19 @@ export async function publishReview(input: {
   readonly reconcileFindings?: boolean;
   readonly report: ReviewReport;
 }): Promise<{ readonly checkUrl: string; readonly findingCount: number }> {
-  if (input.report.scope.head !== input.context.headSha) {
+  validateFindingPresentation(input.report);
+  if (
+    input.report.scope.head !== input.context.headSha ||
+    input.report.scope.base !== input.context.baseSha
+  ) {
     throw new Error(
-      `Refusing to publish report for ${input.report.scope.head}; trusted head is ${input.context.headSha}`,
+      "Refusing to publish report outside the trusted base and head",
     );
   }
+  if (!input.context.patchFingerprint) {
+    throw new Error("Trusted review context is missing patch identity");
+  }
+  await verifyPublicationHead(input.octokit, input.context);
   const config = input.config ?? { blocking: false, profile: "balanced" as const };
   const changed = await input.octokit.paginate(
     input.octokit.rest.pulls.listFiles,
@@ -1085,6 +1150,17 @@ export async function publishReview(input: {
       per_page: 100,
     },
   );
+  for (const file of changed) {
+    if (!file.sha) {
+      throw new Error(
+        `GitHub did not return content identity for ${file.filename}; refusing to advance the review baseline`,
+      );
+    }
+  }
+  const patchFiles = parsePullRequestFiles(changed);
+  // File pagination is not tied to a commit in GitHub's API. Confirm that
+  // it still describes this review before publishing any visible result.
+  await verifyPublicationHead(input.octokit, input.context);
   let cleanupFindingComments: (() => Promise<void>) | null = null;
   if (input.reconcileFindings ?? true) {
     cleanupFindingComments = await reconcileFindingComments(
@@ -1113,29 +1189,7 @@ export async function publishReview(input: {
   const checkUrl =
     check.html_url ??
     `https://github.com/${input.context.repository}/pull/${input.context.pullRequest}/checks`;
-  const patchFiles: PatchFile[] = changed.map((file) => {
-    if (!file.sha) {
-      throw new Error(
-        `GitHub did not return content identity for ${file.filename}; refusing to advance the review baseline`,
-      );
-    }
-    return {
-      blobSha: file.sha,
-      path: file.filename,
-      previousPath: file.previous_filename ?? null,
-      status:
-        file.status === "removed"
-          ? "deleted"
-          : file.status === "renamed"
-            ? "renamed"
-            : file.status === "added"
-              ? "added"
-              : file.status === "copied"
-                ? "copied"
-                : "modified",
-      patch: file.patch ?? null,
-    };
-  });
+  await verifyPublicationHead(input.octokit, input.context);
   await writeReviewState(input.octokit, input.context, {
     schemaVersion: 2,
     app: checkName,
@@ -1144,11 +1198,7 @@ export async function publishReview(input: {
     publication: config,
     baseline: {
       head: input.context.headSha,
-      patchFingerprint:
-        input.context.patchFingerprint ??
-        (() => {
-          throw new Error("Trusted review context is missing patch identity");
-        })(),
+      patchFingerprint: input.context.patchFingerprint,
       findingsArtifactUrl: checkUrl,
       files: effectivePatchFileFingerprints(patchFiles),
       report: input.report,

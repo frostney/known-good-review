@@ -140,6 +140,7 @@ const packetReceiptSchema = z.object({
   after: reviewEvidenceProgressSchema,
   packet: reviewEvidencePacketSchema,
 });
+const packetSessionSchema = z.object({ checkpointRevision: z.number().int().nonnegative() });
 
 export type ReviewEvidenceProgress = z.infer<
   typeof reviewEvidenceProgressSchema
@@ -347,7 +348,30 @@ export async function readReviewEvidenceProgress(
       completedEntries: [],
     };
   }
-  return reviewEvidenceProgressSchema.parse(JSON.parse(source));
+  const progress = reviewEvidenceProgressSchema.parse(JSON.parse(source));
+  validateReviewEvidenceProgress(progress, manifest);
+  return progress;
+}
+
+function validateReviewEvidenceProgress(
+  progress: ReviewEvidenceProgress,
+  manifest: ReviewEvidenceManifest,
+): void {
+  const index = progress.cursor?.entryIndex ?? manifest.entries.length;
+  const entry = manifest.entries[index];
+  if (
+    progress.completedEntries.length !== index ||
+    progress.completedEntries.some((completed, offset) => completed !== offset) ||
+    (progress.cursor !== null && (
+      !entry ||
+      (progress.cursor.characterOffset > 0 && (
+        entry.kind !== "included" ||
+        progress.cursor.characterOffset >= entry.patchCharacters
+      ))
+    ))
+  ) {
+    throw new Error("Review evidence progress does not match the exact manifest");
+  }
 }
 
 async function writeReviewEvidenceProgress(
@@ -367,6 +391,7 @@ async function buildReviewEvidencePacket(
   manifest: ReviewEvidenceManifest,
   progress: ReviewEvidenceProgress,
 ) {
+  validateReviewEvidenceProgress(progress, manifest);
   if (progress.cursor === null) {
     return reviewEvidencePacketSchema.parse({
       entries: [],
@@ -435,15 +460,35 @@ export async function readNextReviewEvidencePacket(
   manifest: ReviewEvidenceManifest,
   axis: ReviewAxis,
   sessionId: string,
+  checkpointRevision: number,
 ) {
   const receiptPath = reviewEvidencePacketReceiptPath(
     manifest.patchFingerprint,
     axis,
     sessionId,
   );
-  const existingReceipt = await sandbox.readTextFile({ path: receiptPath });
+  const sessionSource = await sandbox.readTextFile({ path: receiptPath });
+  const session = sessionSource === null
+    ? null
+    : packetSessionSchema.parse(JSON.parse(sessionSource));
+  const revision = session?.checkpointRevision ??
+    z.number().int().nonnegative().parse(checkpointRevision);
+  const revisionReceiptPath = `${reviewEvidenceDirectory(manifest.patchFingerprint)}/packets/${axis}-revision-${revision}.json`;
+  const existingReceipt = await sandbox.readTextFile({ path: revisionReceiptPath });
   if (existingReceipt !== null) {
     const receipt = packetReceiptSchema.parse(JSON.parse(existingReceipt));
+    const expected = await buildReviewEvidencePacket(
+      sandbox, manifest, receipt.before,
+    );
+    if (
+      JSON.stringify(receipt.packet) !== JSON.stringify(expected) ||
+      JSON.stringify(receipt.after) !== JSON.stringify({
+        cursor: expected.nextCursor,
+        completedEntries: expected.completedEntries,
+      })
+    ) {
+      throw new Error("Review evidence packet failed integrity validation");
+    }
     const current = await readReviewEvidenceProgress(sandbox, manifest, axis);
     if (JSON.stringify(current) === JSON.stringify(receipt.before)) {
       await writeReviewEvidenceProgress(
@@ -455,19 +500,36 @@ export async function readNextReviewEvidencePacket(
     } else if (JSON.stringify(current) !== JSON.stringify(receipt.after)) {
       throw new Error("Review evidence packet progress is inconsistent");
     }
+    if (!session) {
+      await sandbox.writeTextFile({
+        path: receiptPath,
+        content: `${JSON.stringify({ checkpointRevision: revision })}\n`,
+      });
+    }
     return receipt.packet;
   }
 
   const before = await readReviewEvidenceProgress(sandbox, manifest, axis);
+  if (session || (revision === 0 && (
+    before.completedEntries.length > 0 || (before.cursor?.characterOffset ?? 0) > 0
+  ))) {
+    throw new Error("Review evidence progress is missing its checkpoint-bound receipt");
+  }
   const packet = await buildReviewEvidencePacket(sandbox, manifest, before);
   const after = reviewEvidenceProgressSchema.parse({
     cursor: packet.nextCursor,
     completedEntries: packet.completedEntries,
   });
   const receipt = packetReceiptSchema.parse({ before, after, packet });
+  // Delivery can finish before the lane saves its findings. A replacement
+  // session at the same checkpoint revision must receive that same packet.
+  await sandbox.writeTextFile({
+    path: revisionReceiptPath,
+    content: `${JSON.stringify(receipt)}\n`,
+  });
   await sandbox.writeTextFile({
     path: receiptPath,
-    content: `${JSON.stringify(receipt)}\n`,
+    content: `${JSON.stringify({ checkpointRevision: revision })}\n`,
   });
   await writeReviewEvidenceProgress(sandbox, manifest, axis, after);
   return packet;

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { reviewAxes } from "./axes";
 import { findingIdentity } from "./finding-identity";
+import { repositoryPathSchema } from "./evidence-bundle";
 import {
   reviewFindingDraftSchema,
   reviewFindingSchema,
@@ -21,18 +22,23 @@ export const schemaDiagnosticSchema = z.object({
 export type SchemaDiagnostic = z.infer<typeof schemaDiagnosticSchema>;
 
 export const reportAssemblyIdentitySchema = z.object({
-  executionRevision: z.literal("review-report-v1"),
+  executionRevision: z.literal("review-report-v2"),
   repositoryId: z.string().min(1),
   pullRequest: z.number().int().positive(),
   baseSha: revisionSchema,
   headSha: revisionSchema,
   patchFingerprint: fingerprintSchema,
   planKind: z.enum(["full", "delta"]),
+  baselineHead: revisionSchema.nullable(),
+  reviewPaths: z.array(repositoryPathSchema).max(2_000),
   activeAxes: z.array(z.enum(reviewAxes)).min(1).max(reviewAxes.length),
   selectedFindingIds: z
     .array(z.string().regex(/^CR-[1-9]\d*$/))
     .max(100),
 }).superRefine((identity, context) => {
+  if ((identity.planKind === "delta") !== (identity.baselineHead !== null)) {
+    context.addIssue({ code: "custom", path: ["baselineHead"], message: "Only delta reviews require an exact baseline head" });
+  }
   if (new Set(identity.activeAxes).size !== identity.activeAxes.length) {
     context.addIssue({
       code: "custom",
@@ -113,8 +119,8 @@ function diagnosticsFrom(error: z.ZodError): SchemaDiagnostic[] {
 export class ReviewReportValidationError extends Error {
   readonly diagnostics: readonly SchemaDiagnostic[];
 
-  constructor(diagnostics: readonly SchemaDiagnostic[]) {
-    super("Canonical review report input is invalid");
+  constructor(diagnostics: readonly SchemaDiagnostic[], message = "Canonical review report input is invalid") {
+    super(message);
     this.name = "ReviewReportValidationError";
     this.diagnostics = diagnostics;
   }
@@ -311,8 +317,7 @@ function priorFindings(
     ]);
   }
   if (
-    priorReport.scope.head === state.identity.headSha ||
-    priorReport.scope.base !== state.identity.baseSha
+    priorReport.scope.head !== state.identity.baselineHead
   ) {
     throw new ReviewReportValidationError([
       { code: "custom", path: ["priorReport", "scope"] },
@@ -356,19 +361,33 @@ export function assembleCanonicalReviewReport(input: {
   if (!draft.success) {
     throw new ReviewReportValidationError(diagnosticsFrom(draft.error));
   }
+  if (state.identity.planKind === "delta") {
+    const paths = new Set(state.identity.reviewPaths);
+    if (draft.data.freshFindings.some((finding) => !paths.has(finding.location.path))) {
+      throw new ReviewReportValidationError([{ code: "custom", path: ["freshFindings", "location", "path"] }]);
+    }
+  }
 
-  const preserved = priorFindings(state, input.priorReport);
-  const knownIdentities = new Set(preserved.map(findingIdentity));
+  const prior = priorFindings(state, input.priorReport);
+  const knownIdentities = new Set(prior.filter((finding) => finding.status !== "fixed").map(findingIdentity));
   const fresh = coalesceFreshFindings(
     draft.data.freshFindings,
     knownIdentities,
   );
+  const revived = new Map(fresh.map((finding) => [findingIdentity(finding), finding]));
+  const preserved = prior.map((finding) => {
+    const identity = findingIdentity(finding);
+    const recurrence = finding.status === "fixed" ? revived.get(identity) : undefined;
+    if (!recurrence) return finding;
+    revived.delete(identity);
+    return { ...recurrence, id: finding.id, status: "open" as const };
+  });
   const highestPriorId = preserved.reduce((highest, finding) => {
     return Math.max(highest, Number(finding.id.slice(3)));
   }, 0);
   const findings = [
     ...preserved,
-    ...fresh.map((finding, index) => ({
+    ...[...revived.values()].map((finding, index) => ({
       ...finding,
       id: `CR-${highestPriorId + index + 1}`,
       status: "open" as const,

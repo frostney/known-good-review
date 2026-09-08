@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { asSchema } from "ai";
 import { readReviewEvidenceInputSchema } from "../agent/tools/read_review_evidence";
 import { reviewLaneCheckpointInputSchema } from "../agent/tools/review_lane_checkpoint";
 import { reviewRecoveryInputSchema } from "../agent/tools/review_recovery";
@@ -97,6 +98,33 @@ function memorySandbox() {
 }
 
 describe("review evidence bundle", () => {
+  test("exports complete canonical revalidation variants through the AI SDK schema", async () => {
+    const schema = await asSchema(recordReviewRevalidationInputSchema).jsonSchema;
+    const variants = schema.properties?.findings;
+    expect(variants).toHaveProperty("type", "array");
+    expect(variants).toHaveProperty("maxItems", 100);
+    const itemSchema = z.object({ items: z.object({ oneOf: z.array(z.object({
+      required: z.array(z.string()),
+      properties: z.record(z.string(), z.unknown()),
+      additionalProperties: z.literal(false),
+    })) }) }).parse(variants);
+    expect(itemSchema.items.oneOf).toHaveLength(4);
+    for (const variant of itemSchema.items.oneOf) {
+      expect(variant.required).toEqual(expect.arrayContaining(["id", "status", "category", "churn", "location", "evidence"]));
+      expect(variant.properties.location).toHaveProperty("properties.path.pattern");
+    }
+  });
+
+  test("model recovery can complete axes but cannot claim application-owned stages", async () => {
+    const schema = await asSchema(reviewRecoveryInputSchema).jsonSchema;
+    expect(JSON.stringify(schema)).not.toContain("report-reconciled");
+    expect(JSON.stringify(schema)).not.toContain("revalidation-complete");
+    expect(reviewRecoveryInputSchema.safeParse({ operation: "advance", stage: "axes-complete" }).success).toBe(true);
+    for (const stage of ["revalidation-complete", "report-reconciled", "published"]) {
+      expect(reviewRecoveryInputSchema.safeParse({ operation: "advance", stage }).success).toBe(false);
+    }
+  });
+
   test("exposes provider-compatible object schemas for variant tools", () => {
     expect(z.toJSONSchema(readReviewEvidenceInputSchema)).toHaveProperty(
       "type",
@@ -457,6 +485,7 @@ describe("review evidence bundle", () => {
       manifest,
       "engineering-quality",
       "session-one",
+      0,
     );
     expect(first.entries).toHaveLength(1);
     expect(first.entries[0]?.content).toHaveLength(500_000);
@@ -471,14 +500,23 @@ describe("review evidence bundle", () => {
         manifest,
         "engineering-quality",
         "session-one",
+        1,
       ),
     ).toEqual(first);
+
+    // A new child after a crash must replay the packet whose checkpoint was
+    // never committed, rather than treating delivery as completed review work.
+    const resumed = await readNextReviewEvidencePacket(
+      sandbox.runtime, manifest, "engineering-quality", "crash-recovery", 0,
+    );
+    expect(resumed).toEqual(first);
 
     const second = await readNextReviewEvidencePacket(
       sandbox.runtime,
       manifest,
       "engineering-quality",
       "session-two",
+      1,
     );
     expect(second.entries[0]?.content).toHaveLength(100_000);
     expect(second.completedEntries).toEqual([0]);
@@ -490,6 +528,66 @@ describe("review evidence bundle", () => {
         "engineering-quality",
       ),
     ).toEqual({ cursor: null, completedEntries: [0] });
+  });
+
+  test("recovers packet delivery interrupted at either progress or session persistence", async () => {
+    // A lane can save an early checkpoint before requesting its first packet.
+    for (const [interruptedWrite, revision] of [[2, 0], [3, 0], [2, 1]] as const) {
+      const sandbox = memorySandbox();
+      const entry = await writeIncludedReviewEvidence(sandbox.runtime, {
+        patchFingerprint: identity.patchFingerprint, path: "src/a.ts",
+        patch: "inspected but not yet checkpointed", patchTokens: 8, status: "modified",
+      });
+      const manifest = reviewEvidenceManifestSchema.parse({ schemaVersion: 1, ...identity, entries: [entry] });
+      let writes = 0;
+      const interrupted = {
+        ...sandbox.runtime,
+        async writeTextFile(input: { path: string; content: string }) {
+          if (++writes === interruptedWrite) throw new Error("simulated interruption");
+          await sandbox.runtime.writeTextFile(input);
+        },
+      };
+      await expect(readNextReviewEvidencePacket(interrupted, manifest, "engineering-quality", "failed", revision))
+        .rejects.toThrow("simulated interruption");
+      const resumed = await readNextReviewEvidencePacket(sandbox.runtime, manifest, "engineering-quality", "replacement", revision);
+      expect(resumed.entries[0]?.content).toBe("inspected but not yet checkpointed");
+      expect(await readReviewEvidenceProgress(sandbox.runtime, manifest, "engineering-quality"))
+        .toEqual({ cursor: null, completedEntries: [0] });
+      expect(await readNextReviewEvidencePacket(sandbox.runtime, manifest, "engineering-quality", "failed", revision))
+        .toEqual(resumed);
+    }
+  });
+
+  test("rejects corrupted packet receipts and progress that skips evidence", async () => {
+    const sandbox = memorySandbox();
+    const entry = await writeIncludedReviewEvidence(sandbox.runtime, {
+      patchFingerprint: identity.patchFingerprint, path: "src/a.ts",
+      patch: "immutable evidence", patchTokens: 4, status: "modified",
+    });
+    const manifest = reviewEvidenceManifestSchema.parse({ schemaVersion: 1, ...identity, entries: [entry] });
+    await readNextReviewEvidencePacket(sandbox.runtime, manifest, "engineering-quality", "first", 0);
+    const receiptPath = [...sandbox.files.keys()].find((path) => path.endsWith("engineering-quality-revision-0.json"))!;
+    const source = sandbox.files.get(receiptPath)!;
+    const receipt = JSON.parse(source);
+    receipt.packet.entries[0].content = "substituted evidence";
+    sandbox.files.set(receiptPath, JSON.stringify(receipt));
+    await expect(readNextReviewEvidencePacket(sandbox.runtime, manifest, "engineering-quality", "replacement", 0))
+      .rejects.toThrow("integrity validation");
+    sandbox.files.set(receiptPath, source);
+    const progressPath = [...sandbox.files.keys()].find((path) => path.endsWith("/progress/engineering-quality.json"))!;
+    for (const progress of [
+      { cursor: null, completedEntries: [] },
+      { cursor: { entryIndex: 0, characterOffset: 999 }, completedEntries: [] },
+      { cursor: null, completedEntries: [1] },
+    ]) {
+      sandbox.files.set(progressPath, JSON.stringify(progress));
+      await expect(readNextReviewEvidencePacket(sandbox.runtime, manifest, "engineering-quality", "replacement", 0))
+        .rejects.toThrow("does not match the exact manifest");
+    }
+    sandbox.files.set(progressPath, JSON.stringify({ cursor: null, completedEntries: [0] }));
+    sandbox.files.delete(receiptPath);
+    await expect(readNextReviewEvidencePacket(sandbox.runtime, manifest, "engineering-quality", "replacement", 0))
+      .rejects.toThrow("missing its checkpoint-bound receipt");
   });
 });
 

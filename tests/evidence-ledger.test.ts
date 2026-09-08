@@ -1,5 +1,7 @@
+import { authenticatedEvidenceSandbox } from "../src/review/authenticated-evidence";
 import { createHash } from "node:crypto";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { reviewRouteState } from "../agent/lib/review-route";
 import type { RuntimeSandboxSession } from "eve/sandbox";
 import {
   GitHubEvidenceError,
@@ -18,9 +20,12 @@ import {
   writeReviewEvidenceLedger,
 } from "../src/review/evidence-ledger";
 import { writeReviewEvidenceManifest } from "../src/review/evidence-bundle";
-import { prepareReviewEvidence } from "../src/review/prepare-review-evidence";
+import { countPatchTokens, prepareReviewEvidence } from "../src/review/prepare-review-evidence";
+import readReviewEvidenceTool from "../agent/tools/read_review_evidence";
+import { withTrustedReviewContext } from "../src/github/trusted-context";
 import { parseReviewConfig } from "../src/config/review-config";
 import { commonWorkFixture } from "./common-work-fixture";
+import { writeLaneCheckpoint } from "../src/review/lane-checkpoint";
 
 const headSha = "2".repeat(40);
 const repositoryDatabaseId = 41;
@@ -103,6 +108,16 @@ function replay(input?: {
 }
 
 describe("exact-head evidence replay", () => {
+  test("counts arbitrary repository text without interpreting model delimiters", () => {
+    expect(countPatchTokens("hello world")).toBe(2);
+    for (const text of ["<|endoftext|>", "<|fim_prefix|>", "日本語 🚀", ""]) {
+      const count = countPatchTokens(text);
+      if (text.length === 0) expect(count).toBe(0);
+      else expect(count).toBeGreaterThan(0);
+      expect(countPatchTokens(text)).toBe(count);
+    }
+  });
+
   test("accepts a digest-validated artifact from the exact workflow head", () => {
     const prepared = replay();
 
@@ -125,7 +140,7 @@ describe("exact-head evidence replay", () => {
   test("binds the root digest and artifact bytes to the complete review identity", async () => {
     const prepared = replay();
     const identity = {
-      executionRevision: "review-evidence-v2" as const,
+      executionRevision: "review-evidence-v3" as const,
       repositoryId: "R_test",
       repositoryDatabaseId,
       repository: "frostney/pascal-mcp-sdk",
@@ -204,8 +219,13 @@ describe("exact-head evidence replay", () => {
   });
 
   test("reuses one complete ledger without rerunning application preparation", async () => {
+    const oldKey = process.env.KNOWN_GOOD_REVIEW_EVIDENCE_KEY;
+    const key = "ab".repeat(32);
+    process.env.KNOWN_GOOD_REVIEW_EVIDENCE_KEY = key;
+    const route = spyOn(reviewRouteState, "get").mockReturnValue({ role: "lane", axis: "engineering-quality", attempt: 0 });
+    try {
     const identity = {
-      executionRevision: "review-evidence-v2" as const,
+      executionRevision: "review-evidence-v3" as const,
       repositoryId: "R_test",
       repositoryDatabaseId,
       repository: "frostney/pascal-mcp-sdk",
@@ -217,9 +237,11 @@ describe("exact-head evidence replay", () => {
     };
     const files = new Map<string, string>();
     const commands: string[] = [];
-    const runtime = {
+    const reads: string[] = [];
+    const rawRuntime = {
       async removePath() {},
       async readTextFile({ path }: { readonly path: string }) {
+        reads.push(path);
         return files.get(path) ?? null;
       },
       async readBinaryFile() {
@@ -245,6 +267,7 @@ describe("exact-head evidence replay", () => {
         files.set(path, content);
       },
     };
+    const runtime = authenticatedEvidenceSandbox(rawRuntime, "review-root", key);
     const manifest = {
       schemaVersion: 1 as const,
       baseSha: identity.baseSha,
@@ -313,11 +336,59 @@ describe("exact-head evidence replay", () => {
     expect(collectionCalls).toBe(0);
     expect(commands).toEqual([]);
 
+    const execute = readReviewEvidenceTool.execute;
+    if (!execute) throw new Error("Evidence tool must have an executor");
+    const auth = withTrustedReviewContext({
+      principalId: "test",
+      principalType: "user",
+      authenticator: "github",
+      attributes: {
+        installation_id: "1",
+        repository: trusted.repository,
+        pull_request_number: String(trusted.pullRequest),
+      },
+    }, {
+      ...trusted,
+      configSource: "",
+      event: "synchronize",
+      plan: JSON.stringify({ kind: "delta" }),
+      reviewFiles: [],
+    });
+    // Only session identity, auth, and sandbox access participate in this tool.
+    const ctx = {
+      session: { id: "lane-1", parent: { rootSessionId: "review-root" }, auth: { current: auth } },
+      getSandbox: async () => rawRuntime,
+    } as unknown as Parameters<typeof execute>[1];
+    reads.length = 0;
+    const packet = await execute({
+      operation: "packet", axis: "engineering-quality", path: null, cursor: null,
+    }, ctx);
+    expect(packet).toMatchObject({ operation: "packet", ledgerDigest: ledger.digest });
+    expect(reads.filter((path) => path.endsWith("/ledger.json"))).toHaveLength(1);
+    expect(reads.filter((path) => path.endsWith("/capabilities.json"))).toHaveLength(1);
+
+    await writeLaneCheckpoint(runtime, {
+      baseSha: identity.baseSha, headSha: identity.headSha,
+      patchFingerprint: identity.patchFingerprint, evidenceDigest: ledger.digest,
+    }, "engineering-quality", {
+      status: "in-progress", reviewedEntries: [], remainingEntries: [], observations: [], nextSteps: ["finish review"],
+      limitations: [], completedReport: null,
+    }, 0);
+    reads.length = 0;
+    await execute({ operation: "packet", axis: "engineering-quality", path: null, cursor: null }, {
+      ...ctx, session: { ...ctx.session, id: "lane-2" },
+    });
+    expect(reads.some((path) => path.endsWith("engineering-quality-revision-1.json"))).toBe(true);
+
     const ledgerPath = reviewEvidenceLedgerPath(identity.patchFingerprint);
-    files.set(
-      ledgerPath,
-      JSON.stringify({ ...ledger, digest: "9".repeat(64) }),
-    );
+    await runtime.writeTextFile({ path: ledgerPath, content: JSON.stringify({ ...ledger, identity: { ...identity, executionRevision: "review-evidence-v2" } }) });
+    await expect(prepareReviewEvidence(
+      runtime as unknown as RuntimeSandboxSession, trusted, [], preparation,
+    )).rejects.toThrow("review-evidence-v3");
+    await runtime.writeTextFile({
+      path: ledgerPath,
+      content: JSON.stringify({ ...ledger, digest: "9".repeat(64) }),
+    });
     await expect(
       prepareReviewEvidence(
         runtime as unknown as RuntimeSandboxSession,
@@ -327,6 +398,14 @@ describe("exact-head evidence replay", () => {
       ),
     ).rejects.toThrow("integrity validation");
     expect(collectionCalls).toBe(0);
+    await expect(execute({
+      operation: "packet", axis: "engineering-quality", path: null, cursor: null,
+    }, ctx)).rejects.toThrow("integrity validation");
+    } finally {
+      route.mockRestore();
+      if (oldKey === undefined) delete process.env.KNOWN_GOOD_REVIEW_EVIDENCE_KEY;
+      else process.env.KNOWN_GOOD_REVIEW_EVIDENCE_KEY = oldKey;
+    }
   });
 
   test("records missing generated output once with a repository remedy", () => {

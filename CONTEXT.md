@@ -20,8 +20,9 @@ or act as a general-purpose GitHub assistant.
   “perspective”, and arbitrary lane taxonomies are not synonyms for axes here.
 - **Finding lane:** a bounded subagent used only to revalidate selected prior
   findings. It is not a new review axis.
-- **Effective patch:** normalized per-file PR patch content that ignores file
-  ordering, Git blob index lines, hunk line-number movement, and CRLF/LF noise.
+- **Effective patch:** normalized per-file PR change that ignores file ordering
+  and hunk line-number movement while preserving source content, including line
+  endings. A complete textual patch can retain its identity across rebases.
 - **Review evidence bundle:** the application-prepared, content-addressed
   manifest, included patch chunks, and classified-file metadata for one exact
   base, head, and effective-patch fingerprint. An Eve hook creates it after
@@ -73,6 +74,6 @@ Gateway-reported cost, duration, outcome, axis, and review kind, not prompts,
 source, findings evidence, credentials, or raw repository content.
 
 Installation lifecycle payloads become authoritative only after Connect OIDC
-verification. Convex records the installation-to-repository association solely
-to delete repository memory when access is removed or the GitHub App is
-uninstalled; installation identity never scopes retrieval or recurrence.
+verification. The installation-to-repository association admits new memory and
+revokes it when access is removed or the GitHub App is uninstalled. Repository
+identity owns retrieval and recurrence; installation identity owns access.

@@ -186,7 +186,10 @@ export function beginReviewRecovery(input: {
   return reviewRecoveryStateSchema.parse({
     schemaVersion: 1,
     executionRevision: "review-recovery-v1",
-    ...input.identity,
+    baseSha: input.identity.baseSha,
+    headSha: input.identity.headSha,
+    patchFingerprint: input.identity.patchFingerprint,
+    planKind: input.identity.planKind,
     activeAxes: input.activeAxes,
     selectedFindingIds: input.selectedFindingIds,
     stage: "started",

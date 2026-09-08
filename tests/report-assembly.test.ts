@@ -79,13 +79,15 @@ function baselineReport(): ReviewReport {
 
 function assemblyState() {
   return beginReportAssembly({
-    executionRevision: "review-report-v1",
+    executionRevision: "review-report-v2",
     repositoryId: "R_pascal_mcp_sdk",
     pullRequest: 61,
     baseSha,
     headSha: failedHead,
     patchFingerprint,
     planKind: "delta",
+    baselineHead,
+    reviewPaths: ["website/scripts/check-discovery-links.mjs", "src/review.ts"],
     activeAxes: [
       "deduplication",
       "claim-and-specification",
@@ -117,6 +119,41 @@ function draft() {
 }
 
 describe("application-owned review report assembly", () => {
+  test("pins delta assembly to its baseline while allowing the base branch to advance", () => {
+    const prior = baselineReport();
+    const state = recordRevalidationResults(assemblyState(), prior.findings.filter((item) => item.id !== "CR-4"));
+    const advancedBase = { ...state, identity: { ...state.identity, baseSha: "9".repeat(40) } };
+    expect(assembleCanonicalReviewReport({ state: advancedBase, priorReport: prior, draft: draft(), generatedAt: prior.generatedAt })
+      .report?.scope.base).toBe("9".repeat(40));
+    expect(() => assembleCanonicalReviewReport({
+      state, priorReport: { ...prior, scope: { ...prior.scope, head: "8".repeat(40) } },
+      draft: draft(), generatedAt: prior.generatedAt,
+    })).toThrow(ReviewReportValidationError);
+  });
+
+  test("rejects fresh delta findings outside the dispatched file scope", () => {
+    const prior = baselineReport();
+    const state = recordRevalidationResults(assemblyState(), prior.findings.filter((item) => item.id !== "CR-4"));
+    const { id: _id, status: _status, ...fresh } = finding("CR-8", "Out of scope");
+    expect(() => assembleCanonicalReviewReport({
+      state, priorReport: prior, generatedAt: prior.generatedAt,
+      draft: { ...draft(), freshFindings: [{ ...fresh, location: { ...fresh.location, path: "unrelated.ts" } }] },
+    })).toThrow(ReviewReportValidationError);
+  });
+
+  test("reopens a recurring fixed finding with its stable identity", () => {
+    const prior = baselineReport();
+    prior.findings[0]!.status = "fixed";
+    const state = recordRevalidationResults(assemblyState(), prior.findings.filter((item) => item.id !== "CR-4"));
+    const { id: _id, status: _status, ...fresh } = prior.findings[0]!;
+    const result = assembleCanonicalReviewReport({
+      state, priorReport: prior, generatedAt: prior.generatedAt,
+      draft: { ...draft(), freshFindings: [fresh] },
+    }).report!;
+    expect(result.findings).toHaveLength(3);
+    expect(result.findings[0]).toMatchObject({ id: "CR-4", status: "open" });
+  });
+
   test("replays the 709983d failure from completed axes and CR-6/CR-7 outcomes", () => {
     const prior = baselineReport();
     const completed = recordRevalidationResults(
@@ -293,13 +330,15 @@ describe("application-owned review report assembly", () => {
       "Application-owned fields",
     );
     const state = beginReportAssembly({
-      executionRevision: "review-report-v1",
+      executionRevision: "review-report-v2",
       repositoryId: "R_pascal_mcp_sdk",
       pullRequest: 63,
       baseSha,
       headSha: failedHead,
       patchFingerprint,
       planKind: "full",
+      baselineHead: null,
+      reviewPaths: [],
       activeAxes: [
         "deduplication",
         "claim-and-specification",

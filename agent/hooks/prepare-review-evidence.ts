@@ -1,3 +1,4 @@
+import { getReviewEvidenceSandbox } from "../lib/evidence-sandbox";
 import { defineHook } from "eve/hooks";
 import { toolResultFrom } from "eve/tools";
 import { z } from "zod";
@@ -48,7 +49,7 @@ export default defineHook({
       );
       const preparationStartedAt = performance.now();
       const ledger = await prepareReviewEvidence(
-        await ctx.getSandbox(),
+        await getReviewEvidenceSandbox(ctx),
         trusted,
         JSON.parse(rawFiles),
         {

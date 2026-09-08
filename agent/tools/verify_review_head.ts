@@ -1,8 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { githubAdapter } from "../../src/github/chat-adapter";
-import { writeReviewState } from "../../src/github/publication";
-import { pendingReviewState } from "../../src/github/review-state";
+import { markInitialReviewRunning } from "../../src/github/publication";
 import {
   reviewContextAttributes,
   trustedGitHubContext,
@@ -11,7 +10,7 @@ import {
 export default defineTool({
   description:
     "Revalidate that the pull request is still open, reviewable, and at the trusted base/head before inspecting or publishing it. Call this after the initial debounce and immediately before every review.",
-  inputSchema: z.object({}).strict(),
+  inputSchema: z.object({}),
   async execute(_input, ctx) {
     if (ctx.session.parent) {
       throw new Error(
@@ -35,23 +34,10 @@ export default defineTool({
       const rawPlan =
         ctx.session.auth.current?.attributes[reviewContextAttributes.plan];
       if (typeof rawPlan === "string") {
-        try {
-          const plan = JSON.parse(rawPlan) as {
-            kind?: string;
-            reason?: string;
-          };
-          if (plan.kind === "full" && plan.reason === "initial") {
-            await writeReviewState(
-              adapter.octokit,
-              trusted,
-              pendingReviewState({
-                pullRequest: trusted.pullRequest,
-                status: "running",
-              }),
-            );
-          }
-        } catch {
-          throw new Error("Trusted review plan is malformed");
+        const plan = z.object({ kind: z.string(), reason: z.string().optional() })
+          .parse(JSON.parse(rawPlan));
+        if (plan.kind === "full" && plan.reason === "initial") {
+          await markInitialReviewRunning(adapter.octokit, trusted);
         }
       }
     }

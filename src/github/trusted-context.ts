@@ -6,6 +6,7 @@ export const reviewContextAttributes = {
   baseSha: "known_good_review_base_sha",
   event: "known_good_review_event",
   headSha: "known_good_review_head_sha",
+  memoryAdmission: "known_good_review_memory_admission",
   patchFingerprint: "known_good_review_patch_fingerprint",
   plan: "known_good_review_plan",
   reviewFiles: "known_good_review_files",
@@ -25,6 +26,7 @@ const trustedGitHubContextSchema = z.object({
   repositoryId: z.string().min(1),
   baseSha: z.string().min(1),
   headSha: z.string().min(1),
+  memoryAdmission: z.string().min(1).optional(),
   patchFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
 });
 
@@ -37,6 +39,7 @@ export function withTrustedReviewContext(
     readonly configSource: string;
     readonly event: string;
     readonly headSha: string;
+    readonly memoryAdmission?: string;
     readonly patchFingerprint?: string;
     readonly plan: string;
     readonly repositoryCreatedAt: number;
@@ -48,14 +51,17 @@ export function withTrustedReviewContext(
     }[];
   },
 ): SessionAuthContext {
+  const attributes = { ...auth.attributes };
+  delete attributes[reviewContextAttributes.memoryAdmission];
   return {
     ...auth,
     attributes: {
-      ...auth.attributes,
+      ...attributes,
       [routingAttribute]: values.configSource,
       [reviewContextAttributes.baseSha]: values.baseSha,
       [reviewContextAttributes.event]: values.event,
       [reviewContextAttributes.headSha]: values.headSha,
+      ...(values.memoryAdmission ? { [reviewContextAttributes.memoryAdmission]: values.memoryAdmission } : {}),
       [reviewContextAttributes.plan]: values.plan,
       [reviewContextAttributes.repositoryCreatedAt]: String(
         values.repositoryCreatedAt,
@@ -99,6 +105,7 @@ export function trustedGitHubContext(
     repositoryId: auth.attributes[reviewContextAttributes.repositoryId],
     baseSha: auth.attributes[reviewContextAttributes.baseSha],
     headSha: auth.attributes[reviewContextAttributes.headSha],
+    memoryAdmission: auth.attributes[reviewContextAttributes.memoryAdmission],
     patchFingerprint:
       auth.attributes[reviewContextAttributes.patchFingerprint],
   });

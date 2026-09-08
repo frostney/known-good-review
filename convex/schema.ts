@@ -8,9 +8,26 @@ import {
   vMemoryStatus,
   vNormalizedMemory,
   vReviewKind,
+  vReembedJob,
 } from "./validators";
 
 export default defineSchema({
+  memoryAccess: defineTable({
+    installationId: v.number(),
+    repositoryId: v.string(),
+    generation: v.number(),
+  }).index("by_installation_and_repository", ["installationId", "repositoryId"])
+    .index("by_installation_id", ["installationId"]),
+
+  memoryUninstalls: defineTable({ installationId: v.number() })
+    .index("by_installation_id", ["installationId"]),
+
+  memoryDeletionDeliveries: defineTable({
+    installationId: v.number(),
+    repositoryId: v.string(),
+    deliveryId: v.string(),
+  }).index("by_installation_repository_delivery", ["installationId", "repositoryId", "deliveryId"]),
+
   repositoryMemory: defineTable({
     installationId: v.number(),
     repositoryId: v.string(),
@@ -23,8 +40,11 @@ export default defineSchema({
     recentReviewTimes: v.array(v.number()),
     activeEmbedding: vEmbedding,
     pendingEmbedding: v.optional(vEmbedding),
+    reembedGeneration: v.optional(v.number()),
+    reembedJob: v.optional(vReembedJob),
     policyHash: v.string(),
     deleting: v.boolean(),
+    deletionWatchdog: v.optional(v.boolean()),
   })
     .index("by_repository_id", ["repositoryId"])
     .index("by_installation_id", ["installationId"]),
@@ -36,6 +56,7 @@ export default defineSchema({
 
   memoryIngestions: defineTable({
     idempotencyKey: v.string(),
+    memoryAdmission: v.optional(v.string()),
     installationId: v.number(),
     repositoryId: v.string(),
     repository: v.string(),
@@ -50,6 +71,7 @@ export default defineSchema({
     memories: v.array(vNormalizedMemory),
     status: vIngestionStatus,
     attempts: v.number(),
+    processingStartedAt: v.optional(v.number()),
     lastFailureCode: v.optional(v.string()),
   })
     .index("by_idempotency_key", ["idempotencyKey"])

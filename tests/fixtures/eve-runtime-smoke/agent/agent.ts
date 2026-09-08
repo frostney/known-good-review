@@ -1,4 +1,5 @@
-import { defineAgent } from "eve";
+import { defineAgent, defineDynamic } from "eve";
+import { currentReviewRoute } from "../../../../agent/lib/review-route";
 import {
   mockModel,
   type MockModelRequest,
@@ -51,11 +52,19 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   return "UNKNOWN-EVAL-SCENARIO";
 }
 
+const model = mockModel({
+  modelId: "known-good-review-runtime-smoke",
+  provider: "known-good-review-fixture",
+  respond,
+});
+
 export default defineAgent({
-  model: mockModel({
-    modelId: "known-good-review-runtime-smoke",
-    provider: "known-good-review-fixture",
-    respond,
+  model: defineDynamic({
+    events: {
+      "step.started": (_event, ctx) => {
+        currentReviewRoute(ctx.channel.kind, ctx.messages);
+        return { model, modelContextWindowTokens: 1_000_000 };
+      },
+    },
   }),
-  modelContextWindowTokens: 1_000_000,
 });

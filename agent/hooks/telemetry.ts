@@ -1,4 +1,6 @@
-import { gateway } from "ai";
+import { defineState } from "eve/context";
+import { recordTurnUsage, summarizeTurnUsage, type TurnUsageState } from "../../src/telemetry/turn-usage";
+import { getReviewEvidenceSandbox } from "../lib/evidence-sandbox";
 import { defineHook, type HookContext } from "eve/hooks";
 import { toolResultFrom } from "eve/tools";
 import publishReviewTool from "../tools/publish_review";
@@ -13,7 +15,8 @@ import {
   trustedGitHubContext,
 } from "../../src/github/trusted-context";
 import { memoryPolicyHash } from "../../src/memory/policy";
-import { parseSubagentRoute, type ReviewRoute } from "../../src/models/routing";
+import type { ReviewRoute } from "../../src/models/routing";
+import { reviewRouteState } from "../lib/review-route";
 import { shadowInputExceedances } from "../../src/telemetry/budget-policy";
 import {
   gatewayTelemetryIdentity,
@@ -48,16 +51,16 @@ import {
 import { beginReportAssembly } from "../../src/review/report-assembly";
 import { z } from "zod";
 
-const stepRoutes = new Map<
+const stepRoutes = defineState<Readonly<Record<
   string,
   { readonly requestedModel: string; readonly route: ReviewRoute }
->();
-const sessionRoutes = new Map<string, ReviewRoute>();
-const publishedTurns = new Set<string>();
-const turnUsage = new Map<
-  string,
-  { inputTokens: number; outputTokens: number }
->();
+>>>("known-good-review.step-routes.v1", () => ({}));
+const publishedTurnId = defineState<string | null>(
+  "known-good-review.published-turn.v1", () => null,
+);
+const turnUsage = defineState<TurnUsageState | null>(
+  "known-good-review.turn-usage.v1", () => null,
+);
 
 const sessionLimitDetailsSchema = z.object({
   kind: z.enum(["input", "output"]),
@@ -83,14 +86,11 @@ function isLifecycleOwner(ctx: {
   });
 }
 
-function executionRoute(
-  channelKind: string | undefined,
-  sessionId: string,
-): ReviewRoute {
+function executionRoute(channelKind: string | undefined): ReviewRoute {
   if (channelKind !== "subagent") {
     return { role: "coordinator", attempt: 0 };
   }
-  return sessionRoutes.get(sessionId) ?? { role: "coordinator", attempt: 0 };
+  return reviewRouteState.get() ?? { role: "coordinator", attempt: 0 };
 }
 
 function reviewAxis(route: ReviewRoute): string {
@@ -135,6 +135,8 @@ function logCompletedModel(
       cacheWriteTokens:
         generation?.cacheWriteTokens ?? observation.cacheWriteTokens,
       costUsd: generation?.costUsd ?? observation.costUsd,
+      sdkCostUsd: generation === null ? observation.costUsd : generation.sdkCostUsd,
+      gatewayNativeUsage: generation?.gatewayNativeUsage ?? null,
       durationMs: generation?.durationMs ?? null,
       latencyMs: generation?.latencyMs ?? null,
       outcome: "succeeded",
@@ -151,8 +153,6 @@ async function reconcilePendingGatewayTelemetry(
     const selectedIds = new Set(current.map(gatewayTelemetryIdentity));
     const reconciliation = await reconcileGatewayTelemetry({
       pending: current,
-      getGenerationInfo: (generationId) =>
-        gateway.getGenerationInfo({ id: generationId }),
     });
     for (const generation of reconciliation.resolved) {
       logCompletedModel(generation, generation);
@@ -203,7 +203,7 @@ async function recoveryWithObservedAxes(
   if (!trusted.patchFingerprint) {
     throw new Error("Trusted review recovery is missing patch identity");
   }
-  const sandbox = await ctx.getSandbox();
+  const sandbox = await getReviewEvidenceSandbox(ctx);
   const checkpointIdentity = await currentLaneCheckpointIdentity(
     ctx.session.auth.current,
     sandbox,
@@ -307,34 +307,32 @@ async function persistFailureEnvelope(
   }
 }
 
-function recordTurnUsage(
-  session: string,
-  turnId: string,
-  inputTokens: number,
-  outputTokens: number,
-): void {
-  const key = turnKey(session, turnId);
-  const current = turnUsage.get(key) ?? { inputTokens: 0, outputTokens: 0 };
-  turnUsage.set(key, {
-    inputTokens: current.inputTokens + inputTokens,
-    outputTokens: current.outputTokens + outputTokens,
-  });
-}
-
 function logTurnUsage(sessionId: string, turnId: string): void {
-  const usage = turnUsage.get(turnKey(sessionId, turnId));
-  turnUsage.delete(turnKey(sessionId, turnId));
-  if (!usage) return;
+  const state = turnUsage.get();
+  if (!state || state.turnId !== turnId || state.completed) return;
+  const usage = summarizeTurnUsage(state);
+  turnUsage.update(() => ({ ...state, completed: true }));
   console.info(
     JSON.stringify({
       event: "known-good-review.budget.completed",
       sessionId,
       turnId,
-      inputTokens: usage.inputTokens,
-      outputTokens: usage.outputTokens,
-      shadowInputExceedances: shadowInputExceedances(usage.inputTokens),
+      scope: "session-turn",
+      ...usage,
+      shadowInputExceedances: usage.inputTokens === null ? null : shadowInputExceedances(usage.inputTokens),
     }),
   );
+}
+
+function finishTurnTracking(sessionId: string, turnId: string, preservePublication = false): boolean {
+  logTurnUsage(sessionId, turnId);
+  const key = turnKey(sessionId, turnId);
+  stepRoutes.update((current) => Object.fromEntries(
+    Object.entries(current).filter(([step]) => !step.startsWith(`${key}:`)),
+  ));
+  const published = publishedTurnId.get() === turnId;
+  if (published && !preservePublication) publishedTurnId.update(() => null);
+  return published;
 }
 
 function reviewKind(
@@ -390,20 +388,9 @@ export default defineHook({
         ),
       );
     },
-    "message.received"(event, ctx) {
-      if (ctx.channel.kind !== "subagent") return;
-      try {
-        sessionRoutes.set(
-          ctx.session.id,
-          parseSubagentRoute([{ role: "user", content: event.data.message }]),
-        );
-      } catch {
-        sessionRoutes.delete(ctx.session.id);
-      }
-    },
-    "action.result"(event, ctx) {
+    "action.result"(event) {
       if (toolResultFrom(event.data.result, publishReviewTool)) {
-        publishedTurns.add(`${ctx.session.id}:${event.data.turnId}`);
+        publishedTurnId.update(() => event.data.turnId);
         const recovery = reviewRecoveryState.get();
         if (recovery?.stage === "report-reconciled") {
           reviewRecoveryState.update(() =>
@@ -413,35 +400,31 @@ export default defineHook({
       }
     },
     "step.started"(event, ctx) {
-      stepRoutes.set(
-        stepKey(ctx.session.id, event.data.turnId, event.data.stepIndex),
-        {
+      const key = stepKey(ctx.session.id, event.data.turnId, event.data.stepIndex);
+      stepRoutes.update((current) => ({
+        ...current,
+        [key]: {
           requestedModel: event.data.modelId,
-          route: executionRoute(ctx.channel.kind, ctx.session.id),
+          route: executionRoute(ctx.channel.kind),
         },
-      );
+      }));
     },
     "step.completed"(event, ctx) {
+      const priorUsage = turnUsage.get();
+      if (priorUsage?.turnId === event.data.turnId && priorUsage.completed) return;
       const key = stepKey(
         ctx.session.id,
         event.data.turnId,
         event.data.stepIndex,
       );
-      const step = stepRoutes.get(key);
+      const step = stepRoutes.get()[key];
       const requestedModel = step?.requestedModel ?? "unknown";
       const route =
-        step?.route ?? executionRoute(ctx.channel.kind, ctx.session.id);
-      stepRoutes.delete(key);
+        step?.route ?? executionRoute(ctx.channel.kind);
       const generationId = event.data.providerMetadata?.gateway.generationId;
       const attributes = ctx.session.auth.current?.attributes ?? {};
-      const inputTokens = event.data.usage?.inputTokens ?? 0;
-      const outputTokens = event.data.usage?.outputTokens ?? 0;
-      recordTurnUsage(
-        ctx.session.id,
-        event.data.turnId,
-        inputTokens,
-        outputTokens,
-      );
+      const inputTokens = event.data.usage?.inputTokens ?? null;
+      const outputTokens = event.data.usage?.outputTokens ?? null;
       const observation: PendingGatewayTelemetry = {
         eventId: event.meta.id,
         sessionId: ctx.session.id,
@@ -456,10 +439,17 @@ export default defineHook({
         requestedModel,
         inputTokens,
         outputTokens,
-        cacheReadTokens: event.data.usage?.cacheReadTokens ?? 0,
-        cacheWriteTokens: event.data.usage?.cacheWriteTokens ?? 0,
-        costUsd: event.data.usage?.costUsd ?? 0,
+        cacheReadTokens: event.data.usage?.cacheReadTokens ?? null,
+        cacheWriteTokens: event.data.usage?.cacheWriteTokens ?? null,
+        costUsd: event.data.usage?.costUsd ?? null,
       };
+      turnUsage.update((current) => recordTurnUsage(current, {
+        eventId: observation.eventId, sessionId: observation.sessionId,
+        turnId: observation.turnId, stepIndex: observation.stepIndex,
+        generationId: observation.generationId, inputTokens: observation.inputTokens,
+        outputTokens: observation.outputTokens, cacheReadTokens: observation.cacheReadTokens,
+        cacheWriteTokens: observation.cacheWriteTokens, costUsd: observation.costUsd,
+      }));
       if (generationId) {
         enqueueGatewayTelemetry(observation);
       } else {
@@ -472,11 +462,10 @@ export default defineHook({
         event.data.turnId,
         event.data.stepIndex,
       );
-      const step = stepRoutes.get(key);
+      const step = stepRoutes.get()[key];
       const requestedModel = step?.requestedModel ?? "unknown";
       const route =
-        step?.route ?? executionRoute(ctx.channel.kind, ctx.session.id);
-      stepRoutes.delete(key);
+        step?.route ?? executionRoute(ctx.channel.kind);
       console.info(
         JSON.stringify({
           event: "known-good-review.model.failed",
@@ -497,15 +486,13 @@ export default defineHook({
       );
     },
     async "turn.failed"(event, ctx) {
-      logTurnUsage(ctx.session.id, event.data.turnId);
+      finishTurnTracking(ctx.session.id, event.data.turnId);
       if (!isLifecycleOwner(ctx)) {
-        publishedTurns.delete(`${ctx.session.id}:${event.data.turnId}`);
-        sessionRoutes.delete(ctx.session.id);
         return;
       }
       const attributes = ctx.session.auth.current?.attributes ?? {};
       const plan = parsedPlan(attributes);
-      const route = executionRoute(ctx.channel.kind, ctx.session.id);
+      const route = executionRoute(ctx.channel.kind);
       if (plan?.kind === "full" || plan?.kind === "delta") {
         try {
           const trusted = trustedGitHubContext(ctx.session.auth.current);
@@ -565,18 +552,15 @@ export default defineHook({
       }
     },
     async "turn.completed"(event, ctx) {
-      logTurnUsage(ctx.session.id, event.data.turnId);
-      const key = `${ctx.session.id}:${event.data.turnId}`;
+      const published = finishTurnTracking(ctx.session.id, event.data.turnId, true);
       if (!isLifecycleOwner(ctx)) {
-        publishedTurns.delete(key);
-        sessionRoutes.delete(ctx.session.id);
         return;
       }
       const attributes = ctx.session.auth.current?.attributes ?? {};
       const plan = parsedPlan(attributes);
       if (
         (plan?.kind === "full" || plan?.kind === "delta") &&
-        !publishedTurns.delete(key)
+        !published
       ) {
         try {
           const trusted = trustedGitHubContext(ctx.session.auth.current);
@@ -619,9 +603,9 @@ export default defineHook({
         );
       }
     },
-    async "turn.cancelled"(_event, ctx) {
+    async "turn.cancelled"(event, ctx) {
+      finishTurnTracking(ctx.session.id, event.data.turnId);
       if (!isLifecycleOwner(ctx)) {
-        sessionRoutes.delete(ctx.session.id);
         return;
       }
       try {

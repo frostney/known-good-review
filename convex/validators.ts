@@ -5,6 +5,13 @@ export const vEmbedding = v.object({
   dimension: v.number(),
 });
 
+export const vReembedJob = v.object({
+  token: v.string(),
+  cursor: v.union(v.string(), v.null()),
+  attempt: v.number(),
+  startedAt: v.optional(v.number()),
+});
+
 export const vMemorySeverity = v.union(
   v.literal("BLOCKING"),
   v.literal("IMPORTANT"),
@@ -90,14 +97,18 @@ export const vRepositoryMemoryDoc = v.object({
   recentReviewTimes: v.array(v.number()),
   activeEmbedding: vEmbedding,
   pendingEmbedding: v.optional(vEmbedding),
+  reembedGeneration: v.optional(v.number()),
+  reembedJob: v.optional(vReembedJob),
   policyHash: v.string(),
   deleting: v.boolean(),
+  deletionWatchdog: v.optional(v.boolean()),
 });
 
 export const vMemoryIngestionDoc = v.object({
   _id: v.id("memoryIngestions"),
   _creationTime: v.number(),
   idempotencyKey: v.string(),
+  memoryAdmission: v.optional(v.string()),
   installationId: v.number(),
   repositoryId: v.string(),
   repository: v.string(),
@@ -112,6 +123,7 @@ export const vMemoryIngestionDoc = v.object({
   memories: v.array(vNormalizedMemory),
   status: vIngestionStatus,
   attempts: v.number(),
+  processingStartedAt: v.optional(v.number()),
   lastFailureCode: v.optional(v.string()),
 });
 

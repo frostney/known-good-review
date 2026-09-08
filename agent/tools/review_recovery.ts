@@ -1,3 +1,4 @@
+import { getReviewEvidenceSandbox } from "../lib/evidence-sandbox";
 import { defineTool, toolOutput } from "eve/tools";
 import { z } from "zod";
 import {
@@ -7,20 +8,15 @@ import {
 import {
   advanceReviewRecovery,
   recoveryWork,
-  reviewRecoveryStages,
 } from "../../src/review/recovery";
 import { readLaneCheckpoint } from "../../src/review/lane-checkpoint";
 import { trustedGitHubContext } from "../../src/github/trusted-context";
 import { currentLaneCheckpointIdentity } from "../lib/review-evidence";
 
-const advanceStages = reviewRecoveryStages.filter(
-  (stage) => stage !== "started" && stage !== "published",
-);
-
 export const reviewRecoveryInputSchema = z
   .object({
     operation: z.enum(["read", "advance"]),
-    stage: z.enum(advanceStages).nullable(),
+    stage: z.literal("axes-complete").nullable(),
   })
   .superRefine((input, context) => {
     if (input.operation === "read" && input.stage !== null) {
@@ -41,7 +37,7 @@ export const reviewRecoveryInputSchema = z
 
 export default defineTool({
   description:
-    "Read the trusted review recovery packet or advance one validated coordinator stage. Use null stage for reads. Axis completion is accepted only when every exact lane checkpoint is complete.",
+    "Read the trusted review recovery packet or verify axes-complete against every exact lane checkpoint. Use null stage for reads. Revalidation and report tools own later stage transitions.",
   inputSchema: reviewRecoveryInputSchema,
   async execute(input, ctx) {
     if (ctx.session.parent) {
@@ -49,35 +45,31 @@ export default defineTool({
     }
     let recovery = currentRecoveryState(ctx.session.auth.current);
     if (input.operation === "advance") {
-      if (input.stage === null) {
-        throw new Error("Recovery advancement requires a stage");
+      if (input.stage !== "axes-complete") {
+        throw new Error("Recovery advancement requires axes-complete");
       }
-      if (input.stage === "axes-complete") {
-        const trusted = trustedGitHubContext(ctx.session.auth.current);
-        if (!trusted.patchFingerprint) {
-          throw new Error("Trusted review recovery is missing patch identity");
-        }
-        const sandbox = await ctx.getSandbox();
-        const checkpointIdentity = await currentLaneCheckpointIdentity(
-          ctx.session.auth.current,
+      const trusted = trustedGitHubContext(ctx.session.auth.current);
+      if (!trusted.patchFingerprint) {
+        throw new Error("Trusted review recovery is missing patch identity");
+      }
+      const sandbox = await getReviewEvidenceSandbox(ctx);
+      const checkpointIdentity = await currentLaneCheckpointIdentity(
+        ctx.session.auth.current,
+        sandbox,
+      );
+      const completedAxes: typeof recovery.completedAxes = [];
+      for (const axis of recovery.activeAxes) {
+        const checkpoint = await readLaneCheckpoint(
           sandbox,
+          checkpointIdentity,
+          axis,
         );
-        const completedAxes: typeof recovery.completedAxes = [];
-        for (const axis of recovery.activeAxes) {
-          const checkpoint = await readLaneCheckpoint(
-            sandbox,
-            checkpointIdentity,
-            axis,
-          );
-          if (checkpoint?.status === "complete") completedAxes.push(axis);
-        }
-        recovery = advanceReviewRecovery(recovery, {
-          completedAxes,
-          stage: input.stage,
-        });
-      } else {
-        recovery = advanceReviewRecovery(recovery, { stage: input.stage });
+        if (checkpoint?.status === "complete") completedAxes.push(axis);
       }
+      recovery = advanceReviewRecovery(recovery, {
+        completedAxes,
+        stage: input.stage,
+      });
       reviewRecoveryState.update(() => recovery);
     }
     return {

@@ -1,4 +1,5 @@
 import { connectGitHubCredentials } from "@vercel/connect/eve";
+import { evidenceSigningKey } from "../../src/review/authenticated-evidence";
 import {
   defaultGitHubAuth,
   GitHubApiError,
@@ -8,6 +9,8 @@ import {
   type GitHubPullRequestEvent,
 } from "eve/channels/github";
 import { z } from "zod";
+import { fetchBoundedGitHubPages } from "../../src/github/pagination";
+import { accessibleRepositoryIds } from "../../src/github/installation-access";
 import { parseReviewConfig } from "../../src/config/review-config";
 import { validateConfiguredModels } from "../../src/models/catalog";
 import { githubAdapter, githubConnector } from "../../src/github/chat-adapter";
@@ -36,7 +39,7 @@ import {
 import { pendingReviewState } from "../../src/github/review-state";
 import { withTrustedReviewContext } from "../../src/github/trusted-context";
 import { handleGitHubLifecycleWebhook } from "../../src/github/lifecycle";
-import { requestMemoryDeletion } from "../../src/memory/client";
+import { captureMemoryAdmission, requestMemoryDeletion } from "../../src/memory/client";
 import { findingsToRevalidate } from "../../src/review/revalidation";
 import type { ReviewAxis } from "../../src/review/axes";
 import { discoverabilityApplies } from "../../src/review/discoverability";
@@ -65,7 +68,6 @@ const repositoryDetailsSchema = z.object({
   node_id: z.string().min(1),
   created_at: z.string().datetime(),
 });
-const accessibleRepositorySchema = z.object({ node_id: z.string().min(1) });
 const checkRunsSchema = z.object({
   check_runs: z.array(
     z.object({
@@ -100,32 +102,17 @@ async function fetchRepositoryDetails(ctx: GitHubInboundContext) {
 async function listAccessibleRepositoryIds(
   installationId: number,
 ): Promise<string[]> {
-  const adapter = githubAdapter(installationId);
-  const repositories = await adapter.octokit.paginate(
-    adapter.octokit.rest.apps.listReposAccessibleToInstallation,
-    { per_page: 100 },
-  );
-  return repositories.map(
-    (repository) => accessibleRepositorySchema.parse(repository).node_id,
-  );
+  return accessibleRepositoryIds(githubAdapter(installationId).octokit);
 }
 
 async function fetchAllPages(
   ctx: GitHubInboundContext,
   path: string,
 ): Promise<unknown[]> {
-  const all: unknown[] = [];
-  for (let page = 1; page <= 20; page += 1) {
-    const separator = path.includes("?") ? "&" : "?";
-    const response = await ctx.github.request({
-      method: "GET",
-      path: `${path}${separator}per_page=100&page=${page}`,
-    });
-    const items = z.array(z.unknown()).parse(response.body);
-    all.push(...items);
-    if (items.length < 100) return all;
-  }
-  throw new Error(`GitHub pagination exceeded the bounded 2,000 item limit for ${path}`);
+  return fetchBoundedGitHubPages(
+    (pagePath) => ctx.github.request({ method: "GET", path: pagePath }),
+    path,
+  );
 }
 
 async function fetchTrustedConfig(
@@ -211,6 +198,15 @@ async function hasReviewControlPermission(
   return canRequestManualFull(
     permissionSchema.parse(permissionResponse.body).permission,
   );
+}
+
+async function reviewMemoryAdmission(ctx: GitHubInboundContext, repositoryId: string): Promise<string | null> {
+  const installationId = ctx.github.installationId;
+  if (!installationId) return null;
+  return captureMemoryAdmission({ installationId, repositoryId }, async () =>
+    (await accessibleRepositoryIds(githubAdapter(installationId).octokit, {
+      wantedRepositoryId: repositoryId, timeoutMs: 5_000,
+    })).includes(repositoryId));
 }
 
 function publicationContext(
@@ -339,13 +335,20 @@ async function trustedReviewControlAuth(ctx: GitHubInboundContext) {
         ).map((finding) => finding.id)
       : []);
 
+  const memoryAdmission = await reviewMemoryAdmission(ctx, repositoryDetails.repositoryId);
   const auth = withTrustedReviewContext(defaultGitHubAuth(ctx), {
     baseSha: pullRequest.base.sha,
     configSource,
     event: "review-control-response",
+    ...(memoryAdmission ? { memoryAdmission } : {}),
     headSha: pullRequest.head.sha,
     patchFingerprint,
-    plan: JSON.stringify({ ...plan, activeAxes, selectedFindingIds }),
+    plan: JSON.stringify({
+      ...plan, activeAxes, selectedFindingIds,
+      baselineHead: plan.kind === "delta"
+        ? pendingIdentity?.baselineHead ?? deltaDispatch?.priorReport?.scope.head
+        : null,
+    }),
     ...repositoryDetails,
     reviewFiles,
   });
@@ -358,10 +361,11 @@ async function trustedReviewControlAuth(ctx: GitHubInboundContext) {
     repositoryDetails.repositoryCreatedAt,
     patchFingerprint,
   );
+  const admittedContext = { ...context, ...(memoryAdmission ? { memoryAdmission } : {}) };
   return {
     auth,
     config,
-    context,
+    context: admittedContext,
     octokit: githubAdapter(context.installationId).octokit,
     state,
   };
@@ -426,6 +430,7 @@ async function dispatchReview(input: {
   let reviewConfig;
   try {
     reviewConfig = parseReviewConfig(configSource);
+    evidenceSigningKey(process.env.KNOWN_GOOD_REVIEW_EVIDENCE_KEY);
     await validateConfiguredModels(reviewConfig);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -562,20 +567,15 @@ async function dispatchReview(input: {
     activeAxes,
     priorFindings:
       dispatch.plan.kind === "delta" && dispatch.priorReport
-        ? { ...dispatch.priorReport, findings: priorFindings }
-        : undefined,
-    carryForwardFindings:
-      dispatch.plan.kind === "delta" && dispatch.priorReport
-        ? dispatch.priorReport.findings.filter(
-            (finding) =>
-              !priorFindings.some((selected) => selected.id === finding.id),
-          )
+        ? { findings: priorFindings }
         : undefined,
   };
+  const memoryAdmission = await reviewMemoryAdmission(input.ctx, repositoryDetails.repositoryId);
   const auth = withTrustedReviewContext(defaultGitHubAuth(input.ctx), {
     baseSha: pullRequest.base.sha,
     configSource,
     event: input.action,
+    ...(memoryAdmission ? { memoryAdmission } : {}),
     headSha: pullRequest.head.sha,
     ...(dispatch.patchFingerprint === undefined
       ? {}
@@ -584,6 +584,7 @@ async function dispatchReview(input: {
       ...dispatch.plan,
       activeAxes,
       selectedFindingIds: priorFindings.map((finding) => finding.id),
+      baselineHead: dispatch.plan.kind === "delta" ? dispatch.priorReport?.scope.head : null,
     }),
     ...repositoryDetails,
     reviewFiles: patchFiles
@@ -761,20 +762,12 @@ export default {
             (await handleGitHubLifecycleWebhook({
               request,
               verifier,
-              deleteRepositories: (repositoryIds) =>
-                requestMemoryDeletion({
-                  kind: "repositories",
-                  repositoryIds: [...repositoryIds],
-                }),
-              reconcileInstallation: (
-                installationId,
-                retainedRepositoryIds,
-              ) =>
-                requestMemoryDeletion({
-                  kind: "installation",
-                  installationId,
-                  retainedRepositoryIds: [...retainedRepositoryIds],
-                }),
+              deleteRepositories: (deletion) => requestMemoryDeletion({
+                ...deletion, kind: "repositories", repositoryIds: [...deletion.repositoryIds],
+              }),
+              reconcileInstallation: (deletion) => requestMemoryDeletion({
+                ...deletion, kind: "installation", retainedRepositoryIds: [...deletion.retainedRepositoryIds],
+              }),
               listAccessibleRepositories: listAccessibleRepositoryIds,
             })) ??
             githubRoute.handler(request, {

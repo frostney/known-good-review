@@ -5,3 +5,4 @@ node_modules
 .nitro
 dist
 coverage
+.agent/

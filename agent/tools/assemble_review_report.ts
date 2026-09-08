@@ -1,3 +1,4 @@
+import { getReviewEvidenceSandbox } from "../lib/evidence-sandbox";
 import { defineTool, toolOutput } from "eve/tools";
 import { githubAdapter } from "../../src/github/chat-adapter";
 import {
@@ -10,7 +11,6 @@ import {
   assembleCanonicalReviewReport,
   reportAssemblyFailure,
 } from "../../src/review/report-assembly";
-import { assembleReviewReportInputSchema } from "../../src/review/tool-inputs";
 import { advanceReviewRecovery } from "../../src/review/recovery";
 import {
   currentRecoveryState,
@@ -21,6 +21,8 @@ import {
   reviewReportState,
 } from "../lib/review-report";
 import { currentLaneCheckpointIdentity } from "../lib/review-evidence";
+
+import { assembleReviewReportInputSchema } from "../../src/review/tool-inputs";
 
 export { assembleReviewReportInputSchema } from "../../src/review/tool-inputs";
 
@@ -49,7 +51,7 @@ export default defineTool({
         "Canonical report assembly requires completed axes and selected-finding revalidation",
       );
     }
-    const sandbox = await ctx.getSandbox();
+    const sandbox = await getReviewEvidenceSandbox(ctx);
     const checkpointIdentity = await currentLaneCheckpointIdentity(
       ctx.session.auth.current,
       sandbox,
@@ -83,16 +85,16 @@ export default defineTool({
         throw new Error("Canonical review report assembly produced no report");
       }
       reviewReportState.update(() => assembled);
-      const advanced = advanceReviewRecovery(recovery, {
-        stage: "report-reconciled",
-      });
-      reviewRecoveryState.update(() => advanced);
       await stageReviewPublication({
         context: trusted,
         identity: assembled.identity,
         octokit,
         report: assembled.report,
       });
+      const advanced = advanceReviewRecovery(recovery, {
+        stage: "report-reconciled",
+      });
+      reviewRecoveryState.update(() => advanced);
       return {
         findingCount: assembled.report.findings.length,
         headSha: assembled.identity.headSha,

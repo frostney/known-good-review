@@ -8,6 +8,11 @@ import {
 
 const requestErrorSchema = z.object({ status: z.number().int() });
 
+export const artifactDownloadLimits = {
+  archiveBytes: 64 * 1024 * 1024,
+  totalBytes: 256 * 1024 * 1024,
+} as const;
+
 function requestFailure(error: unknown, forbiddenCode: string): never {
   const parsed = requestErrorSchema.safeParse(error);
   throw new GitHubEvidenceError(
@@ -17,14 +22,37 @@ function requestFailure(error: unknown, forbiddenCode: string): never {
   );
 }
 
-async function archiveBytes(data: unknown): Promise<Uint8Array> {
-  if (data instanceof Uint8Array) return data;
-  if (data instanceof ArrayBuffer) return new Uint8Array(data);
-  if (ArrayBuffer.isView(data)) {
-    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+async function archiveBytes(data: unknown, limit: number): Promise<Uint8Array> {
+  if (data instanceof ReadableStream) {
+    const reader = data.getReader();
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    try {
+      while (true) {
+        const { done, value }: { done: boolean; value?: unknown } = await reader.read();
+        if (done) break;
+        if (!(value instanceof Uint8Array)) throw new GitHubEvidenceError("invalid-artifact-stream");
+        length += value.byteLength;
+        if (length > limit) throw new GitHubEvidenceError("artifact-download-size-limit");
+        chunks.push(value);
+      }
+    } catch (error) {
+      await reader.cancel().catch(() => {});
+      throw error;
+    } finally {
+      reader.releaseLock();
+    }
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    return bytes;
   }
-  if (data instanceof Blob) return new Uint8Array(await data.arrayBuffer());
-  throw new Error("GitHub returned an unsupported artifact archive payload");
+  const bytes = data instanceof Uint8Array ? data
+    : data instanceof ArrayBuffer ? new Uint8Array(data)
+      : ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : null;
+  if (!bytes) throw new GitHubEvidenceError("invalid-artifact-stream");
+  if (bytes.byteLength > limit) throw new GitHubEvidenceError("artifact-download-size-limit");
+  return bytes;
 }
 
 export async function collectExactHeadGitHubEvidence(
@@ -35,7 +63,11 @@ export async function collectExactHeadGitHubEvidence(
     readonly repo: string;
     readonly repositoryDatabaseId: number;
   },
+  limits: { readonly archiveBytes: number; readonly totalBytes: number } = artifactDownloadLimits,
 ): Promise<PreparedGitHubEvidence> {
+  if (![limits.archiveBytes, limits.totalBytes].every((limit) => Number.isSafeInteger(limit) && limit > 0)) {
+    throw new Error("Artifact download limits must be positive byte counts");
+  }
   const [checkRuns, workflowRuns] = await Promise.all([
     octokit
       .paginate(octokit.rest.checks.listForRef, {
@@ -63,7 +95,10 @@ export async function collectExactHeadGitHubEvidence(
     number,
     { readonly archive: Uint8Array; readonly metadata: unknown }[]
   >();
+  let downloadedBytes = 0;
   for (const run of workflowRuns) {
+    if (run.head_sha !== identity.headSha) throw new GitHubEvidenceError("stale-workflow-head");
+    if (run.repository.id !== identity.repositoryDatabaseId) throw new GitHubEvidenceError("mismatched-workflow-repository");
     if (run.status !== "completed" || run.conclusion !== "success") continue;
     const artifacts = await octokit
       .paginate(
@@ -84,18 +119,23 @@ export async function collectExactHeadGitHubEvidence(
     }[] = [];
     for (const artifact of artifacts) {
       if (artifact.expired) continue;
+      const limit = Math.min(limits.archiveBytes, limits.totalBytes - downloadedBytes);
+      if (artifact.size_in_bytes > limit) throw new GitHubEvidenceError("artifact-download-size-limit");
       const download = await octokit.rest.actions
         .downloadArtifact({
           owner: identity.owner,
           repo: identity.repo,
           artifact_id: artifact.id,
           archive_format: "zip",
+          request: { parseSuccessResponseBody: false, signal: AbortSignal.timeout(60_000) },
         })
         .catch((error: unknown) =>
           requestFailure(error, "actions-read-permission-missing"),
         );
+      const archive = await archiveBytes(download.data, limit);
+      downloadedBytes += archive.byteLength;
       prepared.push({
-        archive: await archiveBytes(download.data),
+        archive,
         metadata: artifact,
       });
     }
