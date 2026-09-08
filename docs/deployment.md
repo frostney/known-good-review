@@ -40,8 +40,8 @@ exact old deletion schemas from `59bf616`.
    HTTP invocations finish. New full/delta dispatches already reset sessions.
    Never restart old unsigned evidence as a new review.
 4. Run `bun run migration:check` in the trusted production build environment
-   immediately before the backend switch. It invokes Convex's native read-only
-   query and rejects queued/running scheduled work, pending ingestion, migration
+   immediately before the backend switch. It reads tables through the native Convex CLI without
+   logging their contents and rejects queued/running scheduled work, pending ingestion, migration
    and deletion. If inspection exceeds its bound, drain through paginated
    inspection first. Credentials remain in the trusted build environment.
 5. After old callers and actions are drained, deploy the backend with the new
