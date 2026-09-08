@@ -4,6 +4,8 @@ import { effectivePatchFingerprint } from "../src/review/effective-patch";
 import type { ReviewState } from "../src/github/review-state";
 import { encodeReviewState } from "../src/github/review-state";
 
+const botUser = { id: 123, login: "known-good-review[bot]", type: "Bot" };
+
 const oldFiles = [
   {
     blobSha: "blob-a",
@@ -66,18 +68,35 @@ function completedState(): ReviewState {
 }
 
 describe("GitHub inbound planning", () => {
+  test("does not trust copied state and finding markers from other authors", () => {
+    const state = completedState();
+    for (const user of [null, { ...botUser, type: "User" }, {
+      ...botUser, login: "another-app[bot]",
+    }]) {
+      expect(reviewStateFromComments([
+        { user, body: encodeReviewState(state) },
+        { user, body: "<!-- known-good-review:finding:CR-1 -->" },
+      ])).toEqual({ kind: "absent" });
+    }
+    const forged = { ...state, updatedAt: "2099-01-01T00:00:00.000Z" };
+    expect(reviewStateFromComments([
+      { user: botUser, body: encodeReviewState(state) },
+      { user: { ...botUser, type: "User" }, body: encodeReviewState(forged) },
+    ])).toEqual({ kind: "valid", state });
+  });
+
   test("treats malformed or missing authoritative state as lost when evidence remains", () => {
     expect(
       reviewStateFromComments([
-        { body: "<!-- known-good-review:state\nnot-valid\n-->" },
+        { user: botUser, body: "<!-- known-good-review:state\nnot-valid\n-->" },
       ]),
     ).toEqual({ kind: "lost" });
     expect(
       reviewStateFromComments([
-        { body: "<!-- known-good-review:finding:CR-1 -->" },
+        { user: botUser, body: "<!-- known-good-review:finding:CR-1 -->" },
       ]),
     ).toEqual({ kind: "lost" });
-    expect(reviewStateFromComments([{ body: "ordinary" }])).toEqual({
+    expect(reviewStateFromComments([{ user: botUser, body: "ordinary" }])).toEqual({
       kind: "absent",
     });
   });
@@ -85,7 +104,7 @@ describe("GitHub inbound planning", () => {
   test("recovers the latest valid state marker", () => {
     const state = completedState();
     expect(
-      reviewStateFromComments([{ body: encodeReviewState(state) }]),
+      reviewStateFromComments([{ user: botUser, body: encodeReviewState(state) }]),
     ).toEqual({ kind: "valid", state });
   });
 

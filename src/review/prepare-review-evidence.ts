@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { RuntimeSandboxSession } from "eve/sandbox";
-import { getEncoding } from "js-tiktoken";
+import { Tiktoken } from "js-tiktoken/lite";
+import o200kBase from "js-tiktoken/ranks/o200k_base";
 import { z } from "zod";
 import type { ReviewConfig } from "../config/review-config";
 import type { TrustedGitHubContext } from "../github/trusted-context";
-import { prepareReviewWorkspace } from "../github/review-workspace";
+import { prepareReviewWorkspace, type ReviewWorkspaceDependencies } from "../github/review-workspace";
 import type { MemoryAvailability } from "../memory/client";
 import { memoryPolicyHash } from "../memory/policy";
 import {
@@ -62,17 +63,24 @@ export const reviewFileScopeSchema = z
 export type ReviewFileScope = z.infer<typeof reviewFileScopeSchema>;
 
 const preparedHistoryLimit = 200;
+let patchEncoder: Tiktoken | undefined;
+
+export function countPatchTokens(text: string): number {
+  patchEncoder ??= new Tiktoken(o200kBase);
+  // Repository text is ordinary data even when it spells a model delimiter.
+  return patchEncoder.encode(text, [], []).length;
+}
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
 function attributeValue(output: string, attribute: string): string | null {
-  const suffix = `: ${attribute}: `;
-  const line = output
-    .split("\n")
-    .find((candidate) => candidate.includes(suffix));
-  return line ? line.slice(line.indexOf(suffix) + suffix.length).trim() : null;
+  const fields = output.split("\0");
+  for (let index = 1; index < fields.length; index += 3) {
+    if (fields[index] === attribute) return fields[index + 1] ?? null;
+  }
+  return null;
 }
 
 function isSet(value: string | null): boolean {
@@ -110,7 +118,7 @@ async function prepareCommonHistory(
   };
   const command = paths.length === 0
     ? null
-    : `cd /workspace && git log --format=%H --max-count=${preparedHistoryLimit + 1} ${shellQuote(identity.baseSha)} -- ${paths.map(shellQuote).join(" ")}`;
+    : `cd /workspace && git --literal-pathspecs log --format=%H --max-count=${preparedHistoryLimit + 1} ${shellQuote(identity.baseSha)} -- ${paths.map(shellQuote).join(" ")}`;
   const result = command
     ? await sandbox.run({ command })
     : { exitCode: 0, stdout: "", stderr: "" };
@@ -124,11 +132,17 @@ async function prepareCommonHistory(
   if (observed.some((sha) => !/^[a-f0-9]{40}$/.test(sha))) {
     throw new Error("Prepared repository history contained an invalid revision");
   }
+  const shallow = paths.length === 0 ? null : await sandbox.run({
+    command: "cd /workspace && git rev-parse --is-shallow-repository",
+  });
+  if (shallow && (shallow.exitCode !== 0 || !/^(true|false)$/.test(String(shallow.stdout).trim()))) {
+    throw new Error("Could not determine repository history completeness");
+  }
   const output = {
     baseSha: identity.baseSha,
     paths,
     commitShas: observed.slice(0, preparedHistoryLimit),
-    truncated: observed.length > preparedHistoryLimit,
+    truncated: observed.length > preparedHistoryLimit || String(shallow?.stdout).trim() === "true",
   };
   const record = commonWorkRecord({
     kind: "repository-history",
@@ -181,6 +195,7 @@ export async function prepareReviewEvidence(
     readonly collectMemory: (query: string) => Promise<MemoryAvailability>;
     readonly config: Pick<ReviewConfig, "embedding">;
     readonly planKind: "full" | "delta";
+    readonly workspaceDependencies?: ReviewWorkspaceDependencies;
   },
 ): Promise<ReviewEvidenceLedger> {
   if (!trusted.patchFingerprint) {
@@ -193,7 +208,7 @@ export async function prepareReviewEvidence(
   }
   const files = reviewFileScopeSchema.parse(inputFiles);
   const identity: ReviewEvidenceLedgerIdentity = {
-    executionRevision: "review-evidence-v2",
+    executionRevision: "review-evidence-v3",
     repositoryId: trusted.repositoryId,
     repositoryDatabaseId: trusted.repositoryDatabaseId,
     repository: trusted.repository,
@@ -215,10 +230,11 @@ export async function prepareReviewEvidence(
     return existing;
   }
 
-  await prepareReviewWorkspace(trusted, sandbox);
+  const mergeBaseSha = await prepareReviewWorkspace(trusted, sandbox, input.workspaceDependencies);
   await resetReviewEvidence(sandbox, trusted.patchFingerprint);
   const indexPath = `/tmp/known-good-review-index-${randomUUID()}`;
   const base = shellQuote(trusted.baseSha);
+  const diffBase = shellQuote(mergeBaseSha);
   const head = shellQuote(trusted.headSha);
   const entries: ReviewEvidenceManifest["entries"] = [];
   try {
@@ -230,11 +246,10 @@ export async function prepareReviewEvidence(
         "Could not prepare trusted-base attributes for review evidence",
       );
     }
-    const encoder = getEncoding("o200k_base");
     for (const file of files) {
       const path = shellQuote(file.path);
       const attributes = await sandbox.run({
-        command: `cd /workspace && GIT_INDEX_FILE=${shellQuote(indexPath)} git check-attr --cached linguist-generated linguist-vendored binary diff -- ${path}`,
+        command: `cd /workspace && GIT_INDEX_FILE=${shellQuote(indexPath)} git check-attr -z --cached linguist-generated linguist-vendored binary diff -- ${path}`,
       });
       if (attributes.exitCode !== 0) {
         throw new Error(
@@ -242,7 +257,7 @@ export async function prepareReviewEvidence(
         );
       }
       const numstat = await sandbox.run({
-        command: `cd /workspace && git diff --numstat ${base} ${head} -- ${path}`,
+        command: `cd /workspace && git --literal-pathspecs diff --numstat ${diffBase} ${head} -- ${path}`,
       });
       if (numstat.exitCode !== 0) {
         throw new Error(`Could not classify Git diff for ${file.path}`);
@@ -271,13 +286,13 @@ export async function prepareReviewEvidence(
         classification.push("binary");
       }
       const patch = await sandbox.run({
-        command: `cd /workspace && git diff --no-ext-diff --full-index ${base} ${head} -- ${path}`,
+        command: `cd /workspace && git --literal-pathspecs diff --no-ext-diff --full-index ${diffBase} ${head} -- ${path}`,
       });
       if (patch.exitCode !== 0) {
         throw new Error(`Could not summarize classified patch ${file.path}`);
       }
       const text = String(patch.stdout);
-      const patchTokens = encoder.encode(text).length;
+      const patchTokens = countPatchTokens(text);
       entries.push(
         classification.length === 0
           ? await writeIncludedReviewEvidence(sandbox, {
@@ -333,12 +348,12 @@ export async function prepareReviewEvidence(
       content: archive,
     });
   }
-  const diffCheckCommand = `cd /workspace && git diff --check ${base} ${head}`;
+  const diffCheckCommand = `cd /workspace && git diff --check ${diffBase} ${head}`;
   const diffCheck = await sandbox.run({ command: diffCheckCommand });
   const probes = [
     prepareCommonProbe({
       id: "git-diff-check",
-      command: "git diff --check <base> <head>",
+      command: "git diff --check <merge-base> <head>",
       exitCode: diffCheck.exitCode,
       stdout: String(diffCheck.stdout),
       stderr: String(diffCheck.stderr),

@@ -9,6 +9,7 @@
  */
 
 import type * as http from "../http.js";
+import type * as memoryAccess from "../memoryAccess.js";
 import type * as memoryActions from "../memoryActions.js";
 import type * as memoryData from "../memoryData.js";
 import type * as validators from "../validators.js";
@@ -21,6 +22,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   http: typeof http;
+  memoryAccess: typeof memoryAccess;
   memoryActions: typeof memoryActions;
   memoryData: typeof memoryData;
   validators: typeof validators;

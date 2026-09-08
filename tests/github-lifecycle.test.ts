@@ -29,13 +29,16 @@ function callbacks() {
   return {
     calls,
     verifier: async () => ({ authenticated: true }),
-    deleteRepositories: async (repositoryIds: readonly string[]) => {
-      calls.push(`delete:${repositoryIds.join(",")}`);
+    deleteRepositories: async (input: { repositoryIds: readonly string[]; installationId: number; deliveryId: string }) => {
+      expect(input.installationId).toBe(41);
+      expect(input.deliveryId).toMatch(/^(delivery-1|forwarded:[a-f0-9-]+)$/);
+      calls.push(`delete:${input.repositoryIds.join(",")}`);
     },
-    reconcileInstallation: async (
-      installationId: number,
-      retainedRepositoryIds: readonly string[],
-    ) => {
+    reconcileInstallation: async ({ installationId, retainedRepositoryIds, deliveryId, uninstalled }: {
+      installationId: number; retainedRepositoryIds: readonly string[]; deliveryId: string; uninstalled: boolean;
+    }) => {
+      expect(deliveryId).toMatch(/^(delivery-1|forwarded:[a-f0-9-]+)$/);
+      expect(uninstalled).toBe(retainedRepositoryIds.length === 0);
       calls.push(
         `reconcile:${installationId}:${retainedRepositoryIds.join(",")}`,
       );
@@ -147,4 +150,18 @@ describe("GitHub App lifecycle webhooks", () => {
       logged.mockRestore();
     }
   });
+});
+
+test("ignores a delayed removal for a repository that is accessible again", async () => {
+  const handlers = callbacks();
+  const response = await handleGitHubLifecycleWebhook({
+    ...handlers,
+    request: request("installation_repositories", { action: "removed", installation, repositories_removed: [{ node_id: "R_retained" }] }),
+  });
+  expect(response?.status).toBe(202);
+  expect(handlers.calls).toEqual([]);
+  const withoutIdentity = request("installation", { action: "deleted", installation });
+  withoutIdentity.headers.delete("x-github-delivery");
+  expect((await handleGitHubLifecycleWebhook({ ...handlers, request: withoutIdentity }))?.status).toBe(202);
+  expect(handlers.calls).toEqual(["reconcile:41:"]);
 });

@@ -134,7 +134,11 @@ Repositories start in bootstrap mode. Adaptive short, mid, and long tiers
 activate only after the confirmed age, review-count, review-day, and span
 gates. Retrieval post-ranks semantic matches by recency tier, severity, open
 state, and distinct-PR recurrence. New memories reuse their one generated
-embedding for both RAG storage and nearest-cluster assignment. Short-term
+embedding for both RAG storage and nearest-cluster assignment. Later ingestions
+reuse a ready RAG entry when its text hash and embedding configuration match.
+Search joins its vector identity to current application records for outcome,
+severity, timestamp and provenance; orphaned and superseded entries are excluded.
+Older metadata-inclusive hashes are replaced on the next ingestion. Short-term
 matches remain individual, mid-term retrieval keeps up to two representatives
 per semantic cluster, and long-term retrieval keeps one. The clustering score
 and tier caps live in the hashed memory policy for deterministic replay and
@@ -142,15 +146,28 @@ explicit tuning. A current review always owns the verdict.
 
 An embedding-model change builds a pending RAG namespace while the active
 namespace continues serving reads, then promotes the replacement atomically.
-Each ingestion records its verified GitHub installation ID as cleanup metadata
-while the namespace remains keyed only by immutable repository ID. Exact
-repository-removal events delete the named node IDs. Complete uninstall sweeps
-all remembered repositories for the installation in bounded pages. The
-documented all-to-selected event with an empty removal list first enumerates the
-installation's remaining accessible repositories and deletes the difference.
-The authenticated deletion endpoint admits the work before the webhook is
-acknowledged, then queues retrying deletion of every tracked RAG entry and
-application record behind the in-flight-ingestion barrier.
+Pages and retries have durable job identities and an 11-minute expiry. Ready
+ingestions on the active model drain before another migration claims work,
+preventing queued configurations from repeatedly switching before ingestion.
+
+Admission receipts come from a persistent installation/repository access record
+created before a fresh native GitHub installation-access check. Removal advances
+its generation before asynchronous cleanup. Ingestion requires the current
+receipt; deleting content never deletes this revocation barrier. Re-adding a
+repository permits a newly checked receipt, while a complete uninstall blocks
+that installation ID. These access and delivery records contain identifiers
+only. Previously running sessions without a receipt skip memory ingestion.
+Access checks stop once the repository is found and have a five-second deadline;
+full lifecycle reconciliation enumerates all pages within fifteen seconds.
+
+Native delivery IDs deduplicate webhook redelivery. Headerless forwarded events
+use an application job ID; current access is checked for every removal event.
+Reconciliation pages through access registrations and stored repositories, so a
+review registered before its first memory write is still revoked. Cleanup jobs
+are bound to the original repository document ID and resume after abandoned
+actions. They drain writers, delete every RAG namespace version through the
+component's native API, then delete application rows. This also removes orphan
+entries left by a crash between RAG insertion and saving the app's vector row.
 
 ## State and publication
 
@@ -173,7 +190,7 @@ result and a hidden canonical state schema v2 artifact, baseline head,
 whole-patch fingerprint, and per-file fingerprints. Findings use native inline
 review threads at their exact diff locations. Hidden semantic fingerprints,
 derived from the canonical cause, invariant, and remedy, own reconciliation;
-`CR-N` remains only the run-local display order. A fixed finding receives one
+`CR-N` is the readable canonical report identifier. A fixed finding receives one
 reply on its original inline thread, which is then resolved; it is never
 reposted. Replacement threads are submitted and the Check and state artifact
 are made durable before old threads are retired. Retirement failures are
@@ -181,8 +198,13 @@ reported as cleanup telemetry and retried by later publication without
 invalidating the new artifact. Check lookup is scoped to the current head and
 fixed aggregate and axis names.
 
-The state artifact is size-bounded to GitHub's comment limit. Oversize or
-invalid output fails before advancing the baseline. A completed or failed Eve
+State uses a single comment when it fits, gzip when necessary, then immutable
+digest-addressed parts when compressed state needs multiple comments. Parts must
+all exist before the summary pointer changes; failed writes preserve the previous
+baseline, and retries reuse existing parts. Each comment is bounded to 65,000
+bytes, serialized state to 8 MiB, and compressed storage to 64 parts of 60,000
+characters. Invalid or oversized state and inline findings fail before advancing
+the baseline. A completed or failed Eve
 turn that did not publish a validated artifact becomes a failed Check; an
 initial failure marks the baseline lost so a later webhook cannot silently run
 a second full review.
@@ -216,7 +238,9 @@ tokens, cache tokens, exact USD cost, generation time, latency, outcome, and
 review kind. Offline replay deduplicates measurements by Agent Run, session,
 and generation identity, then compares recorded and candidate phases without
 using any measurement as an acceptance gate. Generation lookup failures are
-visible but do not expose prompts or source.
+visible but do not expose prompts or source. Each metadata request has a
+five-second timeout; unresolved records remain pending. Completed, failed and
+cancelled turns release their transient tracking and flush observed usage.
 
 Eve caps the complete review execution tree at 8,000,000 provider-reported
 input tokens and 512,000 output tokens. Child sessions receive shares of the

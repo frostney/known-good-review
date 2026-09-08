@@ -4,6 +4,8 @@ import type { TrustedGitHubContext } from "../github/trusted-context";
 import type { ReviewReport } from "../review/findings";
 import {
   memoryDeletionSchema,
+  memoryAdmissionRequestSchema,
+  memoryAdmissionResponseSchema,
   memoryIngestionSchema,
   memorySearchResponseSchema,
   type MemoryDeletion,
@@ -89,6 +91,7 @@ export function normalizedReviewMemory(input: {
     },
   }));
   return memoryIngestionSchema.parse({
+    memoryAdmission: input.context.memoryAdmission ?? null,
     idempotencyKey: idempotencyKey({
       repositoryId: input.context.repositoryId,
       pullRequest: input.context.pullRequest,
@@ -111,6 +114,22 @@ export function normalizedReviewMemory(input: {
   });
 }
 
+export async function captureMemoryAdmission(
+  identity: { readonly installationId: number; readonly repositoryId: string },
+  verifyCurrentAccess: () => Promise<boolean>,
+): Promise<string | null> {
+  if (!memoryServiceConfig()) return null;
+  try {
+    const response = await postMemoryService("/memory/admission", memoryAdmissionRequestSchema.parse(identity), 5_000);
+    if (!response.ok) return null;
+    const { receipt } = memoryAdmissionResponseSchema.parse(await response.json());
+    // Checking access after capture closes the race with concurrent revocation.
+    return receipt && await verifyCurrentAccess() ? receipt : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function requestMemoryDeletion(
   deletion: MemoryDeletion,
 ): Promise<void> {
@@ -127,7 +146,7 @@ export async function requestMemoryDeletion(
 export async function enqueueReviewMemory(
   ingestion: MemoryIngestion,
 ): Promise<"queued" | "unavailable"> {
-  if (!memoryServiceConfig()) return "unavailable";
+  if (!memoryServiceConfig() || !ingestion.memoryAdmission) return "unavailable";
   try {
     const response = await postMemoryService("/memory/ingest", ingestion, 5_000);
     if (!response.ok) {

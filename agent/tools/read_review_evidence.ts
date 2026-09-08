@@ -1,3 +1,5 @@
+import { getReviewEvidenceSandbox } from "../lib/evidence-sandbox";
+import { requireReviewLane } from "../lib/review-route";
 import { defineTool, toolOutput } from "eve/tools";
 import { z } from "zod";
 import { trustedGitHubContext } from "../../src/github/trusted-context";
@@ -80,39 +82,22 @@ export default defineTool({
     "Read the application-prepared immutable evidence ledger. Every lane packet carries the same stable common-work identities, prepared repository memory and history, exact-head Check and artifact provenance, common probes, typed gaps, bounded included patches, and excluded generated, vendored, or binary metadata. Manifest and patch paging remain available to the coordinator. Use this instead of reconstructing shared evidence.",
   inputSchema: readReviewEvidenceInputSchema,
   async execute(input, ctx) {
+    if (input.operation === "packet" && input.axis) requireReviewLane(input.axis);
     const trusted = trustedGitHubContext(ctx.session.auth.current);
     if (!trusted.patchFingerprint) {
       throw new Error(
         "Trusted review context is missing the patch fingerprint",
       );
     }
-    const sandbox = await ctx.getSandbox();
+    const sandbox = await getReviewEvidenceSandbox(ctx);
     const ledgerIdentity = currentReviewEvidenceIdentity(
       ctx.session.auth.current,
     );
-    const ledger = await readReviewEvidenceLedger(sandbox, ledgerIdentity);
     const manifest = await readReviewEvidenceManifest(sandbox, {
       baseSha: trusted.baseSha,
       headSha: trusted.headSha,
       patchFingerprint: trusted.patchFingerprint,
     });
-    const capabilities = await readCapabilityPreflight(sandbox, manifest);
-    validateReviewEvidenceLedgerComponents(ledger, {
-      capabilities,
-      manifest,
-    });
-    await validatePreparedArtifactArchives(sandbox, ledger);
-    if (input.operation === "manifest") {
-      return {
-        operation: "manifest" as const,
-        ledgerDigest: ledger.digest,
-        commonWork: ledger.commonWork,
-        github: ledger.github,
-        probes: ledger.probes,
-        gaps: ledger.gaps,
-        ...reviewEvidencePage(manifest, input.cursor ?? 0),
-      };
-    }
     if (input.operation === "packet") {
       if (input.axis === null) {
         throw new Error("Packet reads require a review axis");
@@ -126,6 +111,21 @@ export default defineTool({
           input.axis,
           ctx.session.id,
         )),
+      };
+    }
+    const ledger = await readReviewEvidenceLedger(sandbox, ledgerIdentity);
+    const capabilities = await readCapabilityPreflight(sandbox, manifest);
+    validateReviewEvidenceLedgerComponents(ledger, { capabilities, manifest });
+    await validatePreparedArtifactArchives(sandbox, ledger);
+    if (input.operation === "manifest") {
+      return {
+        operation: "manifest" as const,
+        ledgerDigest: ledger.digest,
+        commonWork: ledger.commonWork,
+        github: ledger.github,
+        probes: ledger.probes,
+        gaps: ledger.gaps,
+        ...reviewEvidencePage(manifest, input.cursor ?? 0),
       };
     }
     if (input.path === null) {

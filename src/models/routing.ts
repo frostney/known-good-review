@@ -10,7 +10,7 @@ import { isReviewAxis, type ReviewAxis } from "../review/axes";
 
 export const routingAttribute = "known_good_review_config";
 const routingPattern =
-  /<known-good-review-routing>(\{[^<]+\})<\/known-good-review-routing>/g;
+  /^<known-good-review-routing>(\{[^<\n]+\})<\/known-good-review-routing>/;
 
 export type ReviewRoute =
   | { readonly role: "coordinator"; readonly attempt: number }
@@ -43,9 +43,12 @@ function parseAttempt(value: unknown): number {
 }
 
 export function parseSubagentRoute(messages: readonly ModelMessage[]): ReviewRoute {
-  const text = messages.map(textFromMessage).join("\n");
-  const matches = [...text.matchAll(routingPattern)];
-  const encoded = matches.at(-1)?.[1];
+  // Only the initial delegation owns routing. Later evidence and model output
+  // can contain copied envelopes and must never change the lane or its model.
+  const delegation = messages.find((message) => message.role === "user");
+  const encoded = delegation
+    ? routingPattern.exec(textFromMessage(delegation))?.[1]
+    : undefined;
   if (!encoded) {
     throw new Error("Review subagent message is missing its routing envelope");
   }
@@ -92,6 +95,7 @@ export function chainForRoute(
 }
 
 export function selectRoutedModel(input: {
+  readonly route?: ReviewRoute;
   readonly attributes: Readonly<
     Record<string, string | readonly string[]>
   > | null;
@@ -116,18 +120,15 @@ export function selectRoutedModel(input: {
     typeof rawConfig === "string"
       ? parseReviewConfig(rawConfig)
       : parseReviewConfig(null);
-  const route: ReviewRoute =
+  const route: ReviewRoute = input.route ?? (
     input.channelKind === "subagent"
       ? parseSubagentRoute(input.messages)
-      : { role: "coordinator", attempt: 0 };
+      : { role: "coordinator", attempt: 0 });
   const chain = chainForRoute(config, route);
-  const model = chain[route.attempt];
-  if (model === undefined) {
-    throw new Error(
-      `Review model fallback attempt ${route.attempt} is outside the trusted chain`,
-    );
-  }
-  const fallbacks = chain.slice(route.attempt + 1);
+  // Attempts count fresh checkpoint continuations. Gateway owns failover
+  // within each invocation, independently of the number of evidence packets.
+  const model = chain[0];
+  const fallbacks = chain.slice(1);
   const gatewayOptions = {
     caching: "auto" as const,
     ...(fallbacks.length > 0 ? { models: fallbacks } : {}),

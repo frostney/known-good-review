@@ -49,7 +49,7 @@ function codeRanges(source: string, explicitTokens: readonly string[]) {
     }
   }
   for (const pattern of [
-    /(?:\.\.?\/)?(?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]*[A-Za-z0-9_-]/g,
+    /(?<![A-Za-z0-9_.-])(?:\.\.?\/)?(?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]*[A-Za-z0-9_-]/g,
     /\b[A-Za-z0-9_-]+\.[A-Za-z][A-Za-z0-9]{0,9}\b/g,
     /\b[A-Za-z_$][A-Za-z0-9_$]*(?=\s*\()/g,
     /\b(?:[a-z][A-Za-z0-9]*[A-Z][A-Za-z0-9]*|[A-Za-z0-9]+_[A-Za-z0-9_]+)\b/g,

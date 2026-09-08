@@ -130,3 +130,33 @@ describe("normalized repository memory", () => {
     expect(correctedReport.idempotencyKey).not.toBe(first.idempotencyKey);
   });
 });
+
+test("captures admission before checking current GitHub access and skips unadmitted writes", async () => {
+  const { captureMemoryAdmission, enqueueReviewMemory } = await import("../src/memory/client");
+  const { spyOn } = await import("bun:test");
+  const previousUrl = process.env.CONVEX_MEMORY_URL;
+  const previousToken = process.env.KNOWN_GOOD_REVIEW_MEMORY_TOKEN;
+  process.env.CONVEX_MEMORY_URL = "https://memory.example.test";
+  process.env.KNOWN_GOOD_REVIEW_MEMORY_TOKEN = "test-only-memory-token";
+  const calls: string[] = [];
+  const fetcher = spyOn(globalThis, "fetch").mockImplementation(Object.assign(async (resource: URL | RequestInfo) => {
+    calls.push(new URL(String(resource)).pathname);
+    return Response.json({ receipt: "access:0" });
+  }, { preconnect: () => {} }));
+  try {
+    const identity = { installationId: 1, repositoryId: "R_repo" };
+    expect(await captureMemoryAdmission(identity, async () => { calls.push("github-access"); return true; })).toBe("access:0");
+    expect(calls).toEqual(["/memory/admission", "github-access"]);
+    expect(await captureMemoryAdmission(identity, async () => false)).toBeNull();
+    const memory = normalizedReviewMemory({ config: parseReviewConfig(null), context, report, reviewKind: "full" });
+    const count = fetcher.mock.calls.length;
+    expect(await enqueueReviewMemory(memory)).toBe("unavailable");
+    expect(fetcher.mock.calls).toHaveLength(count);
+    const admitted = normalizedReviewMemory({ config: parseReviewConfig(null), context: { ...context, memoryAdmission: "access:0" }, report, reviewKind: "full" });
+    expect(admitted.memoryAdmission).toBe("access:0");
+  } finally {
+    fetcher.mockRestore();
+    if (previousUrl === undefined) delete process.env.CONVEX_MEMORY_URL; else process.env.CONVEX_MEMORY_URL = previousUrl;
+    if (previousToken === undefined) delete process.env.KNOWN_GOOD_REVIEW_MEMORY_TOKEN; else process.env.KNOWN_GOOD_REVIEW_MEMORY_TOKEN = previousToken;
+  }
+});

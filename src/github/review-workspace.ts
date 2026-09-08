@@ -1,7 +1,7 @@
 import { getToken } from "@vercel/connect";
 import type { SandboxNetworkPolicy } from "eve/sandbox";
 import { z } from "zod";
-import { githubConnector } from "./chat-adapter";
+import { githubAdapter, githubConnector } from "./chat-adapter";
 import type { TrustedGitHubContext } from "./trusted-context";
 
 const privateSubnets = [
@@ -34,11 +34,20 @@ interface ReviewWorkspaceSandbox {
   setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
 }
 
-interface ReviewWorkspaceDependencies {
+export interface ReviewWorkspaceDependencies {
   readonly getInstallationToken: (installationId: number) => Promise<string>;
+  readonly getMergeBase: (context: TrustedGitHubContext) => Promise<string>;
 }
 
 const defaultDependencies: ReviewWorkspaceDependencies = {
+  async getMergeBase(context) {
+    const { data } = await githubAdapter(context.installationId).octokit.rest.repos.compareCommitsWithBasehead({
+      owner: context.owner, repo: context.repo,
+      basehead: `${context.baseSha}...${context.headSha}`,
+      per_page: 1,
+    });
+    return data.merge_base_commit.sha;
+  },
   getInstallationToken: (installationId) =>
     getToken(githubConnector, {
       installationId: String(installationId),
@@ -118,9 +127,12 @@ export async function prepareReviewWorkspace(
   context: TrustedGitHubContext,
   sandbox: ReviewWorkspaceSandbox,
   dependencies: ReviewWorkspaceDependencies = defaultDependencies,
-): Promise<void> {
+): Promise<string> {
   const baseSha = revisionSchema.parse(context.baseSha);
   const headSha = revisionSchema.parse(context.headSha);
+  // PR patches begin at the common ancestor, while policy comes from the
+  // current base tip. Resolve the ancestor outside the untrusted sandbox.
+  const mergeBaseSha = revisionSchema.parse(await dependencies.getMergeBase(context));
   const installationToken = await dependencies.getInstallationToken(
     context.installationId,
   );
@@ -145,6 +157,7 @@ export async function prepareReviewWorkspace(
       [
         "-C /workspace fetch --force --no-tags --depth=1 origin",
         shellQuote(`+${baseSha}:refs/known-good-review/base`),
+        shellQuote(`+${mergeBaseSha}:refs/known-good-review/merge-base`),
         shellQuote(
           `+refs/pull/${context.pullRequest}/head:refs/known-good-review/head`,
         ),
@@ -159,6 +172,7 @@ export async function prepareReviewWorkspace(
   for (const [label, expected] of [
     ["base", baseSha],
     ["head", headSha],
+    ["merge-base", mergeBaseSha],
   ] as const) {
     const resolved = await runGit(
       sandbox,
@@ -180,4 +194,5 @@ export async function prepareReviewWorkspace(
     "Review workspace cleanup",
     "-C /workspace clean -ffd",
   );
+  return mergeBaseSha;
 }

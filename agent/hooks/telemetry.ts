@@ -1,4 +1,4 @@
-import { gateway } from "ai";
+import { getReviewEvidenceSandbox } from "../lib/evidence-sandbox";
 import { defineHook, type HookContext } from "eve/hooks";
 import { toolResultFrom } from "eve/tools";
 import publishReviewTool from "../tools/publish_review";
@@ -151,8 +151,6 @@ async function reconcilePendingGatewayTelemetry(
     const selectedIds = new Set(current.map(gatewayTelemetryIdentity));
     const reconciliation = await reconcileGatewayTelemetry({
       pending: current,
-      getGenerationInfo: (generationId) =>
-        gateway.getGenerationInfo({ id: generationId }),
     });
     for (const generation of reconciliation.resolved) {
       logCompletedModel(generation, generation);
@@ -203,7 +201,7 @@ async function recoveryWithObservedAxes(
   if (!trusted.patchFingerprint) {
     throw new Error("Trusted review recovery is missing patch identity");
   }
-  const sandbox = await ctx.getSandbox();
+  const sandbox = await getReviewEvidenceSandbox(ctx);
   const checkpointIdentity = await currentLaneCheckpointIdentity(
     ctx.session.auth.current,
     sandbox,
@@ -335,6 +333,16 @@ function logTurnUsage(sessionId: string, turnId: string): void {
       shadowInputExceedances: shadowInputExceedances(usage.inputTokens),
     }),
   );
+}
+
+function finishTurnTracking(sessionId: string, turnId: string): boolean {
+  logTurnUsage(sessionId, turnId);
+  sessionRoutes.delete(sessionId);
+  const key = turnKey(sessionId, turnId);
+  for (const step of stepRoutes.keys()) {
+    if (step.startsWith(`${key}:`)) stepRoutes.delete(step);
+  }
+  return publishedTurns.delete(key);
 }
 
 function reviewKind(
@@ -497,10 +505,8 @@ export default defineHook({
       );
     },
     async "turn.failed"(event, ctx) {
-      logTurnUsage(ctx.session.id, event.data.turnId);
+      finishTurnTracking(ctx.session.id, event.data.turnId);
       if (!isLifecycleOwner(ctx)) {
-        publishedTurns.delete(`${ctx.session.id}:${event.data.turnId}`);
-        sessionRoutes.delete(ctx.session.id);
         return;
       }
       const attributes = ctx.session.auth.current?.attributes ?? {};
@@ -565,18 +571,15 @@ export default defineHook({
       }
     },
     async "turn.completed"(event, ctx) {
-      logTurnUsage(ctx.session.id, event.data.turnId);
-      const key = `${ctx.session.id}:${event.data.turnId}`;
+      const published = finishTurnTracking(ctx.session.id, event.data.turnId);
       if (!isLifecycleOwner(ctx)) {
-        publishedTurns.delete(key);
-        sessionRoutes.delete(ctx.session.id);
         return;
       }
       const attributes = ctx.session.auth.current?.attributes ?? {};
       const plan = parsedPlan(attributes);
       if (
         (plan?.kind === "full" || plan?.kind === "delta") &&
-        !publishedTurns.delete(key)
+        !published
       ) {
         try {
           const trusted = trustedGitHubContext(ctx.session.auth.current);
@@ -619,9 +622,9 @@ export default defineHook({
         );
       }
     },
-    async "turn.cancelled"(_event, ctx) {
+    async "turn.cancelled"(event, ctx) {
+      finishTurnTracking(ctx.session.id, event.data.turnId);
       if (!isLifecycleOwner(ctx)) {
-        sessionRoutes.delete(ctx.session.id);
         return;
       }
       try {

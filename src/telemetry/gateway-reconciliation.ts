@@ -1,10 +1,18 @@
 import {
   GatewayNotFoundError,
   GatewayResponseError,
+  createGateway,
   type GatewayGenerationInfo,
 } from "@ai-sdk/gateway";
 
 const defaultRetryDelaysMs = [0, 100, 250, 500, 1_000] as const;
+const telemetryGateway = createGateway({
+  fetch: Object.assign(
+    (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
+      fetch(input, { ...init, signal: AbortSignal.timeout(5_000) }),
+    { preconnect: fetch.preconnect },
+  ),
+});
 
 export interface PendingGatewayTelemetry {
   readonly eventId: string;
@@ -135,7 +143,9 @@ function validationIssues(
 
 function isRetryableLookup(error: unknown): boolean {
   if (GatewayNotFoundError.isInstance(error)) return true;
-  if (GatewayResponseError.isInstance(error)) return error.isRetryable;
+  if (GatewayResponseError.isInstance(error)) {
+    return error.statusCode === 404 || error.isRetryable;
+  }
   const code = statusCode(error);
   return (
     code === 404 ||
@@ -182,7 +192,7 @@ function enriched(
 
 export async function reconcileGatewayTelemetry(input: {
   readonly pending: readonly PendingGatewayTelemetry[];
-  readonly getGenerationInfo: (
+  readonly getGenerationInfo?: (
     generationId: string,
   ) => Promise<GatewayGenerationInfo>;
   readonly retryDelaysMs?: readonly number[];
@@ -197,6 +207,7 @@ export async function reconcileGatewayTelemetry(input: {
     throw new Error("Gateway telemetry reconciliation needs an attempt");
   }
   const wait = input.wait ?? sleep;
+  const getGenerationInfo = input.getGenerationInfo ?? ((id: string) => telemetryGateway.getGenerationInfo({ id }));
   const resolved: ReconciledGatewayTelemetry[] = [];
   const terminalFailures: FailedLookup[] = [];
   let retryablePending = [...input.pending];
@@ -214,7 +225,7 @@ export async function reconcileGatewayTelemetry(input: {
     const results = await Promise.all(
       retryablePending.map(async (observation) => {
         try {
-          const generation = await input.getGenerationInfo(
+          const generation = await getGenerationInfo(
             observation.generationId,
           );
           return { kind: "resolved" as const, observation, generation };

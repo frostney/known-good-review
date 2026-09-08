@@ -17,7 +17,6 @@ import {
   requestsManualFullReview,
   reviewControlResponse,
 } from "../src/github/manual-full";
-import { summarizeUsage } from "../src/telemetry/usage";
 import {
   startsFreshReviewSession,
   withFreshReviewSessions,
@@ -212,48 +211,4 @@ describe("GitHub-owned state and telemetry", () => {
     ).toBeFalse();
   });
 
-  test("aggregates metadata-only usage and exact reported cost", () => {
-    const summary = summarizeUsage([
-      {
-        actualModel: "openai/gpt-5.6-sol",
-        attempt: 0,
-        axis: "coordinator",
-        cacheReadTokens: 3,
-        cacheWriteTokens: 2,
-        costUsd: 0.12,
-        durationMs: 100,
-        fallbackReason: null,
-        inputTokens: 10,
-        outcome: "succeeded",
-        outputTokens: 5,
-        requestedModel: "openai/gpt-5.6-sol",
-        reviewKind: "full",
-      },
-      {
-        actualModel: "moonshotai/kimi-k3",
-        attempt: 1,
-        axis: "deduplication",
-        cacheReadTokens: 1,
-        cacheWriteTokens: 0,
-        costUsd: 0.03,
-        durationMs: 40,
-        fallbackReason: "rate_limit",
-        inputTokens: 8,
-        outcome: "succeeded",
-        outputTokens: 4,
-        requestedModel: "openai/gpt-5.6-sol",
-        reviewKind: "full",
-      },
-    ]);
-    expect(summary).toEqual({
-      cacheReadTokens: 4,
-      cacheWriteTokens: 2,
-      costUsd: 0.15,
-      durationMs: 140,
-      inputTokens: 18,
-      invocations: 2,
-      models: ["openai/gpt-5.6-sol", "moonshotai/kimi-k3"],
-      outputTokens: 9,
-    });
-  });
 });

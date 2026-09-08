@@ -18,10 +18,16 @@ export default defineTool({
       );
     }
     const sandbox = await ctx.getSandbox();
-    await sandbox.run({
-      command: "find /workspace -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +",
-    });
-    await sandbox.stop();
+    try {
+      const result = await sandbox.run({
+        command: "find /workspace -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + && rm -rf -- /tmp/known-good-review",
+      });
+      if (result.exitCode !== 0) {
+        throw new Error("Review sandbox cleanup failed");
+      }
+    } finally {
+      await sandbox.stop();
+    }
     return { cleaned: true, sandboxId: sandbox.id };
   },
 });

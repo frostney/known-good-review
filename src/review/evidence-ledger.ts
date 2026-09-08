@@ -29,7 +29,7 @@ export const commonEvidenceProbeSchema = z.object({
 export type CommonEvidenceProbe = z.infer<typeof commonEvidenceProbeSchema>;
 
 export const reviewEvidenceLedgerIdentitySchema = z.object({
-  executionRevision: z.literal("review-evidence-v2"),
+  executionRevision: z.literal("review-evidence-v3"),
   repositoryId: z.string().min(1),
   repositoryDatabaseId: z.number().int().positive(),
   repository: z.string().regex(/^[^/]+\/[^/]+$/),
