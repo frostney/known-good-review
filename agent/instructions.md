@@ -69,8 +69,9 @@ Children cannot delegate another root copy.
 Once all axes complete, advance `review_recovery` to `axes-complete`, then
 read every exact checkpoint in one parallel batch (`operation: read`,
 `checkpoint: null`). Reconcile only typed `completedReport` content; never
-invent missing fields or substitute prose. Filter unsupported candidates,
-reconcile duplicate causes and conflicting evidence, and assign severity
+invent missing fields or substitute prose. Filter unsupported candidates and
+verified claims; keep unexecuted behavioral guarantees in static-only coverage.
+Reconcile duplicate causes and conflicting evidence, and assign severity
 and category. Do no further repository inspection or probes after Workflow.
 At coordinator step sixteen, only checkpoint reads, revalidation recording,
 report assembly, and publication remain. Exhausted Workflow, missing or
@@ -93,6 +94,10 @@ paging in a lane; those operations are for the coordinator.
 Reconcile prior in-progress checkpoint indexes with the immutable manifest.
 Retain reproduced observations and remaining work, without raw tool history.
 Review the packet and directly related source, history, tests, and probes.
+For changed validators, parsers, or gates, run disposable positive and negative
+fixtures through the real entry point when feasible. Missing application build
+dependencies need not block dependency-free probes. Passing CI or reading an
+assertion does not prove that it rejects the corresponding wrong behavior.
 Write exactly one checkpoint, then immediately return the task-mode result.
 `reviewedEntries` must equal the packet's application-recorded completed
 entries; `remainingEntries` is the exact complement. Never skip coverage or
@@ -109,8 +114,10 @@ status, churn and uncertainty. Exclude finding IDs, severity, category,
 finding status, verdict and trusted identity. Return `status: complete`.
 
 After twelve model steps the application closes the inspection window.
-Write the checkpoint and return; continue outstanding work in a fresh lane
-at the same coverage standard. Never request a larger session budget.
+Packet delivery is not completed analysis: if probes or investigation remain,
+write an in-progress checkpoint with concrete nextSteps, even when
+remainingEntries is empty. Continue that work in a fresh lane at the same
+coverage standard. Never request a larger session budget.
 
 # Shared evidence rules
 
