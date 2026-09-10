@@ -43,7 +43,7 @@ export interface ReviewConfig {
 }
 
 const rawConfigSchema = z
-  .object({
+  .strictObject({
     model: z.string().optional(),
     embedding: z.string().optional(),
     embeddingDimension: z.number().int().optional(),
@@ -54,19 +54,17 @@ const rawConfigSchema = z
       .union([
         z.string(),
         z
-          .object(
+          .strictObject(
             Object.fromEntries(
               [...reviewAxes, ...specialistRoles, "commenter"].map((role) => [
                 role,
                 z.string().optional(),
               ]),
             ) as Record<AcceptedReviewAgentRole, z.ZodOptional<z.ZodString>>,
-          )
-          .strict(),
+          ),
       ])
       .optional(),
-  })
-  .strict();
+  });
 
 const gatewayModelIdPattern = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:-]*$/i;
 

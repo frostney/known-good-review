@@ -2,11 +2,10 @@ import { z } from "zod";
 import type { ReviewFinding } from "../review/findings";
 
 export const richTextSegmentSchema = z
-  .object({
+  .strictObject({
     kind: z.enum(["text", "code"]),
     value: z.string().min(1),
-  })
-  .strict();
+  });
 
 export const richTextSchema = z.array(richTextSegmentSchema).min(1);
 export type RichText = z.infer<typeof richTextSchema>;

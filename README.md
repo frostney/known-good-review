@@ -154,8 +154,8 @@ the application-staged report after exact review identity validation.
 Requirements are Bun 1.4.2 and the runtime prerequisites selected by Eve's
 local sandbox backend. The project intentionally uses Bun for installs, scripts,
 tests, and builds. Node 24 remains the deployment engine because that is the
-current Eve/Vercel runtime contract. CI also checks Bun 1.3.14 and 1.4.0
-for compatibility with existing development environments.
+current Eve/Vercel runtime contract. Only the latest stable Bun release is
+supported, currently pinned in `packageManager`; CI reads that same pin.
 
 ```bash
 bun install

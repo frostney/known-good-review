@@ -62,22 +62,20 @@ export const capabilityRepositoryMarkers = [
 ] as const;
 
 const capabilityPayloadSchema = z
-  .object({
+  .strictObject({
     schemaVersion: z.literal(1),
     baseSha: revisionSchema,
     headSha: revisionSchema,
     patchFingerprint: fingerprintSchema,
     network: z.literal("github-only"),
     commands: z.array(
-      z.object({ name: commandNameSchema, available: z.boolean() }).strict(),
+      z.strictObject({ name: commandNameSchema, available: z.boolean() }),
     ),
     repositoryMarkers: z.array(z.string().min(1)),
-  })
-  .strict();
+  });
 
 export const capabilityPreflightSchema = capabilityPayloadSchema
-  .extend({ digest: fingerprintSchema })
-  .strict();
+  .extend({ digest: fingerprintSchema });
 
 export type CapabilityPreflight = z.infer<typeof capabilityPreflightSchema>;
 

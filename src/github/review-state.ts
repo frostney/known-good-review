@@ -33,7 +33,7 @@ export const reviewStateSchema = z.object({
     .object({
       head: z.string().min(1),
       patchFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
-      findingsArtifactUrl: z.string().url(),
+      findingsArtifactUrl: z.url(),
       files: z.record(z.string().min(1), z.string().regex(/^[a-f0-9]{64}$/)),
       report: reviewReportSchema,
     })
@@ -42,11 +42,11 @@ export const reviewStateSchema = z.object({
     .object({
       identity: reportAssemblyIdentitySchema,
       report: reviewReportSchema,
-      stagedAt: z.string().datetime(),
+      stagedAt: z.iso.datetime(),
     })
     .optional(),
   failure: reviewFailureEnvelopeSchema.optional(),
-  updatedAt: z.string().datetime(),
+  updatedAt: z.iso.datetime(),
 });
 
 export type ReviewState = z.infer<typeof reviewStateSchema>;

@@ -19,47 +19,41 @@ const laneReportCandidateSchema = reviewFindingEvidenceSchema
   .extend({
     churn: findingChurnSchema.nullable(),
     uncertainty: z.array(boundedReportText).max(12),
-  })
-  .strict();
+  });
 
 export const laneCompletedReportSchema = z
-  .object({
+  .strictObject({
     axis: z.enum(reviewAxes),
     scope: z
-      .object({
+      .strictObject({
         claim: boundedReportText,
         dirtyState: boundedReportText,
         inspectedSupportingContext: z.array(boundedReportText).max(100),
-      })
-      .strict(),
+      }),
     coverage: z
-      .object({
+      .strictObject({
         staticOnly: z.array(boundedReportText).max(100),
         unreached: z.array(boundedReportText).max(100),
-      })
-      .strict(),
+      }),
     churn: z
-      .object({
+      .strictObject({
         window: boundedReportText,
         symbolCoverage: z.array(boundedReportText).max(100),
         fileFallbacks: z.array(boundedReportText).max(100),
-      })
-      .strict(),
+      }),
     probes: z
       .array(
         z
-          .object({
+          .strictObject({
             commandOrAction: boundedReportText,
             result: boundedReportText,
-          })
-          .strict(),
+          }),
       )
       .max(100),
     candidates: z.array(laneReportCandidateSchema).max(100),
     verifiedClaims: z.array(boundedReportText).max(100),
     limitations: z.array(boundedReportText).max(100),
   })
-  .strict()
   .refine(
     (report) =>
       Buffer.byteLength(JSON.stringify(report), "utf8") <= 24_000,
@@ -69,7 +63,7 @@ export const laneCompletedReportSchema = z
 export type LaneCompletedReport = z.infer<typeof laneCompletedReportSchema>;
 
 export const laneCheckpointContentSchema = z
-  .object({
+  .strictObject({
     status: z.enum(["in-progress", "complete"]),
     reviewedEntries: z.array(z.number().int().nonnegative()).max(2_000),
     remainingEntries: z.array(z.number().int().nonnegative()).max(2_000),
@@ -78,7 +72,6 @@ export const laneCheckpointContentSchema = z
     limitations: z.array(z.string().min(1).max(500)).max(20),
     completedReport: laneCompletedReportSchema.nullable(),
   })
-  .strict()
   .superRefine((checkpoint, ctx) => {
     if (checkpoint.status === "complete" && !checkpoint.completedReport) {
       ctx.addIssue({

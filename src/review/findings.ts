@@ -7,34 +7,31 @@ export const repositoryRelativePathSchema = z
   .regex(/^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.\.(?:\/|$)).+$/);
 
 export const findingLocationSchema = z
-  .object({
+  .strictObject({
     path: repositoryRelativePathSchema,
     line: z.number().int().positive(),
     symbol: z.string().nullable(),
-  })
-  .strict();
+  });
 
 export const findingChurnSchema = z
-  .object({
+  .strictObject({
     granularity: z.enum(["symbol", "file"]),
     window: z.string(),
     touches: z.number().int().nonnegative(),
     linesAdded: z.number().int().nonnegative(),
     linesDeleted: z.number().int().nonnegative(),
     coSignals: z.array(z.string()),
-  })
-  .strict();
+  });
 
 export const reviewFindingEvidenceSchema = z
-  .object({
+  .strictObject({
     title: z.string().min(1),
     location: findingLocationSchema,
     evidence: z.array(z.string().min(1)).min(1),
     impact: z.string().min(1),
     remedy: z.string().min(1),
     staticOnly: z.boolean(),
-  })
-  .strict();
+  });
 
 const findingDraftBaseShape = {
   severity: z.enum(["BLOCKING", "IMPORTANT", "IMPROVEMENT", "NITPICK"]),
@@ -42,33 +39,29 @@ const findingDraftBaseShape = {
 };
 
 const claimFindingDraftSchema = z
-  .object({
+  .strictObject({
     ...findingDraftBaseShape,
     category: z.literal("CLAIM"),
     churn: z.null(),
-  })
-  .strict();
+  });
 const qualityFindingDraftSchema = z
-  .object({
+  .strictObject({
     ...findingDraftBaseShape,
     category: z.literal("QUALITY"),
     churn: z.null(),
-  })
-  .strict();
+  });
 const architectureRiskFindingDraftSchema = z
-  .object({
+  .strictObject({
     ...findingDraftBaseShape,
     category: z.literal("ARCHITECTURE_RISK"),
     churn: findingChurnSchema,
-  })
-  .strict();
+  });
 const discoverabilityFindingDraftSchema = z
-  .object({
+  .strictObject({
     ...findingDraftBaseShape,
     category: z.literal("DISCOVERABILITY"),
     churn: z.null(),
-  })
-  .strict();
+  });
 
 export const reviewFindingDraftSchema = z.discriminatedUnion("category", [
   claimFindingDraftSchema,
@@ -93,7 +86,7 @@ export const reviewReportSchema = z
   .object({
     schemaVersion: z.literal(2),
     kind: z.literal("code-review"),
-    generatedAt: z.string().datetime(),
+    generatedAt: z.iso.datetime(),
     verdict: z.enum([
       "APPROVE",
       "APPROVE_WITH_IMPROVEMENTS",

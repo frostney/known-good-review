@@ -3,7 +3,7 @@
     "target": "ES2022",
     "module": "esnext",
     "moduleResolution": "bundler",
-    "types": ["bun", "node"],
+    "types": ["bun", "node", "eve/workflow-modules"],
     "strict": true,
     "exactOptionalPropertyTypes": true,
     "noImplicitOverride": true,

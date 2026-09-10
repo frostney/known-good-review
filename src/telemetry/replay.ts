@@ -7,7 +7,7 @@ import {
 
 const revisionSchema = z.string().regex(/^[a-f0-9]{40}$/);
 const fingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
-const timestampSchema = z.string().datetime();
+const timestampSchema = z.iso.datetime();
 
 const usageSchema = z.object({
   inputTokens: z.number().int().nonnegative(),

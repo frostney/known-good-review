@@ -45,7 +45,7 @@ function repositoryNamespace(repositoryId: string): string {
 
 function ragFor(embedding: EmbeddingConfig) {
   return new RAG(components.rag, {
-    textEmbeddingModel: gateway.embedding(embedding.model),
+    textEmbeddingModel: gateway.embeddingModel(embedding.model),
     embeddingDimension: embedding.dimension,
   });
 }
@@ -81,7 +81,7 @@ async function embeddingForText(
   text: string,
 ): Promise<{ readonly vector: number[]; readonly tokens: number }> {
   const result = await embed({
-    model: gateway.embedding(embedding.model),
+    model: gateway.embeddingModel(embedding.model),
     value: text,
   });
   if (result.embedding.length !== embedding.dimension) {

@@ -7,18 +7,16 @@ const repositoryReferenceSchema = z.object({
 });
 
 const lifecyclePayloadSchema = z
-  .object({
+  .looseObject({
     action: z.string(),
     installation: z
-      .object({
+      .looseObject({
         id: z.number().int().positive(),
         account: z.unknown().optional(),
         repository_selection: z.string().optional(),
-      })
-      .passthrough(),
+      }),
     repositories_removed: z.array(repositoryReferenceSchema).optional(),
-  })
-  .passthrough();
+  });
 
 export type GitHubLifecycleEvent =
   | {

@@ -30,10 +30,24 @@ export default defineEval({
       count: 1,
     });
     t.eventOrder([
-      { type: "subagent.called", count: 1 },
+      { type: "subagent.called", data: { childSessionId: delegated.data.childSessionId }, count: 1 },
       { type: "message.received", data: { message: /Result:\nSUBAGENT-CHILD-COMPLETE/ }, count: 1 },
       { type: "message.completed", data: { message: "SUBAGENT-ROUTING-COMPLETE" }, count: 1 },
     ]);
     t.messageIncludes("SUBAGENT-ROUTING-COMPLETE");
+
+    // The waiting Workflow must finish its child before the same parent turn
+    // returns. This also proves Eve builds and executes without an app SDK pin.
+    const workflowTurn = await t.send("KGR-EVAL-WORKFLOW-ROUTING");
+    workflowTurn.expectOk();
+    t.calledTool("fixture_workflow", { count: 1 });
+    t.messageIncludes("WORKFLOW-ROUTING-COMPLETE");
+    t.noFailedActions();
+    const workflowDelegation = workflowTurn.events.find((event) => event.type === "subagent.called");
+    if (!workflowDelegation) throw new Error("Expected a Workflow child session");
+    const workflowChild = await t.target.attachSession(workflowDelegation.data.childSessionId);
+    workflowChild.succeeded();
+    workflowChild.calledTool("fixture_step", { count: 1, input: { marker: "routing" } });
+    workflowChild.messageIncludes("SUBAGENT-CHILD-COMPLETE");
   },
 });

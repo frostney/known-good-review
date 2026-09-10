@@ -9,6 +9,7 @@ import { routingEnvelope } from "../../../../src/models/routing";
 
 const subagentRoutingMarker = "KGR-EVAL-SUBAGENT-ROUTING";
 const subagentChildMarker = "KGR-EVAL-SUBAGENT-CHILD";
+const workflowRoutingMarker = "KGR-EVAL-WORKFLOW-ROUTING";
 
 function hasToolResult(request: MockModelRequest, name: string): boolean {
   return request.toolResults.some((result) => result.name === name);
@@ -16,6 +17,28 @@ function hasToolResult(request: MockModelRequest, name: string): boolean {
 
 function respond(request: MockModelRequest): MockModelResponse | string {
   const prompt = request.userMessages.join("\n");
+
+  if (prompt.includes(workflowRoutingMarker)) {
+    const result = request.toolResults.find((item) => item.name === "fixture_workflow");
+    if (result) {
+      if (!JSON.stringify(result.output).includes("SUBAGENT-CHILD-COMPLETE")) {
+        throw new Error("The waiting Workflow must return the child's final result");
+      }
+      return "WORKFLOW-ROUTING-COMPLETE";
+    }
+    return {
+      toolCalls: [{
+        name: "fixture_workflow",
+        input: {
+          message: `${routingEnvelope({
+            role: "lane",
+            axis: "engineering-quality",
+            attempt: 0,
+          })}\n${subagentChildMarker}`,
+        },
+      }],
+    };
+  }
 
   if (prompt.includes(subagentChildMarker) && !prompt.includes(subagentRoutingMarker)) {
     return hasToolResult(request, "fixture_step")

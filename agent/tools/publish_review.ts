@@ -6,7 +6,7 @@ import { trustedGitHubContext } from "../../src/github/trusted-context";
 import { routingAttribute } from "../../src/models/routing";
 import { publishPendingReview } from "../lib/publish-review";
 
-export const publishReviewInputSchema = z.object({}).strict();
+export const publishReviewInputSchema = z.strictObject({});
 
 export default defineTool({
   description:

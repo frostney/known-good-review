@@ -17,7 +17,7 @@ const checkRunSchema = z.object({
     "pending",
   ]),
   conclusion: z.string().min(1).nullable(),
-  details_url: z.string().url().nullable(),
+  details_url: z.url().nullable(),
   external_id: z.string().nullable(),
   app: z.object({ slug: z.string().min(1).nullable() }).nullable(),
 });
@@ -40,8 +40,8 @@ const artifactSchema = z.object({
   size_in_bytes: z.number().int().nonnegative(),
   expired: z.boolean(),
   digest: artifactDigestSchema.nullable(),
-  created_at: z.string().datetime(),
-  expires_at: z.string().datetime(),
+  created_at: z.iso.datetime(),
+  expires_at: z.iso.datetime(),
   workflow_run: z
     .object({
       id: z.number().int().positive(),
@@ -65,7 +65,7 @@ export const preparedCheckRunSchema = z.object({
     "pending",
   ]),
   conclusion: z.string().min(1).nullable(),
-  detailsUrl: z.string().url().nullable(),
+  detailsUrl: z.url().nullable(),
   externalId: z.string().nullable(),
 });
 
@@ -75,8 +75,8 @@ export const preparedArtifactSchema = z.object({
   sizeInBytes: z.number().int().nonnegative(),
   digest: artifactDigestSchema,
   archiveFile: z.string().regex(/^artifact-[1-9]\d*\.zip$/),
-  createdAt: z.string().datetime(),
-  expiresAt: z.string().datetime(),
+  createdAt: z.iso.datetime(),
+  expiresAt: z.iso.datetime(),
   workflowRun: z.object({
     id: z.number().int().positive(),
     name: z.string().min(1).nullable(),
@@ -118,7 +118,7 @@ const exactHeadGitHubEvidencePayloadSchema = z.object({
   schemaVersion: z.literal(1),
   repositoryDatabaseId: z.number().int().positive(),
   headSha: revisionSchema,
-  observedAt: z.string().datetime(),
+  observedAt: z.iso.datetime(),
   checks: z.array(preparedCheckRunSchema),
   artifacts: artifactAvailabilitySchema,
   gaps: z.array(evidenceGapSchema),
