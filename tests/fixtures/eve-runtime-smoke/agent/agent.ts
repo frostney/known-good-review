@@ -17,7 +17,7 @@ function hasToolResult(request: MockModelRequest, name: string): boolean {
 function respond(request: MockModelRequest): MockModelResponse | string {
   const prompt = request.userMessages.join("\n");
 
-  if (prompt.includes(subagentChildMarker)) {
+  if (prompt.includes(subagentChildMarker) && !prompt.includes(subagentRoutingMarker)) {
     return hasToolResult(request, "fixture_step")
       ? "SUBAGENT-CHILD-COMPLETE"
       : {
@@ -32,7 +32,9 @@ function respond(request: MockModelRequest): MockModelResponse | string {
 
   if (prompt.includes(subagentRoutingMarker)) {
     return hasToolResult(request, "agent")
-      ? "SUBAGENT-ROUTING-COMPLETE"
+      ? request.messages.some((message) => message.text.includes("SUBAGENT-CHILD-COMPLETE"))
+        ? "SUBAGENT-ROUTING-COMPLETE"
+        : "SUBAGENT-ROUTING-PENDING"
       : {
           toolCalls: [
             {
