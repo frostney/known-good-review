@@ -24,3 +24,13 @@ export function coordinatorReviewWindowClosed(input: {
     input.stepIndex >= coordinatorReviewSteps
   );
 }
+
+export function assertReviewWorkflowWindow(input: {
+  readonly channelKind: string | undefined;
+  readonly reviewKind: string | undefined;
+  readonly stepIndex: number;
+}): void {
+  if (coordinatorReviewWindowClosed(input)) {
+    throw new Error("The coordinator review window is complete; further workflow dispatch is forbidden");
+  }
+}

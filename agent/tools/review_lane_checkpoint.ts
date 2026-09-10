@@ -1,6 +1,7 @@
 import { getReviewEvidenceSandbox } from "../lib/evidence-sandbox";
 import { requireReviewLane } from "../lib/review-route";
 import { defineTool, toolOutput } from "eve/tools";
+import type { SessionContext } from "eve/context";
 import { z } from "zod";
 import { trustedGitHubContext } from "../../src/github/trusted-context";
 import { reviewAxes } from "../../src/review/axes";
@@ -10,6 +11,7 @@ import {
   validateLaneCheckpointCoverage,
   validateLaneCheckpointEvidenceProgress,
   writeLaneCheckpoint,
+  type LaneCheckpoint,
 } from "../../src/review/lane-checkpoint";
 import {
   readReviewEvidenceManifest,
@@ -18,6 +20,26 @@ import {
 import { githubAdapter } from "../../src/github/chat-adapter";
 import { publishAxisCheckpoint } from "../../src/github/publication";
 import { currentLaneCheckpointIdentity } from "../lib/review-evidence";
+import { attestCheckpoint } from "../../src/review/checkpoint-attestation";
+import { reviewRouteState } from "../lib/review-route";
+
+function checkpointAttestation(
+  ctx: Pick<SessionContext, "session">,
+  checkpoint: LaneCheckpoint | null,
+  operation: "read" | "write",
+): string | null {
+  const parent = ctx.session.parent;
+  const route = reviewRouteState.get();
+  if (!checkpoint || !parent || route?.role !== "lane" || route.axis !== checkpoint.axis) return null;
+  return attestCheckpoint({
+    checkpoint,
+    rootSessionId: parent.rootSessionId,
+    invocationId: parent.callId,
+    attempt: route.attempt,
+    operation,
+    secret: process.env.KNOWN_GOOD_REVIEW_EVIDENCE_KEY,
+  });
+}
 
 export const reviewLaneCheckpointInputSchema = z
   .object({
@@ -78,6 +100,7 @@ export default defineTool({
       return {
         operation: "read" as const,
         checkpoint,
+        attestation: checkpointAttestation(ctx, checkpoint, "read"),
       };
     }
     if (input.checkpoint === null) {
@@ -105,6 +128,7 @@ export default defineTool({
     return {
       operation: "write" as const,
       checkpoint,
+      attestation: checkpointAttestation(ctx, checkpoint, "write"),
     };
   },
   toModelOutput(output) {
@@ -117,6 +141,7 @@ export default defineTool({
               revision: output.checkpoint.revision,
               status: output.checkpoint.status,
             },
+            attestation: output.attestation,
           }
         : output,
     );

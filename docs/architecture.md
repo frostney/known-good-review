@@ -94,14 +94,37 @@ that each axis must revalidate against the current pull request.
 Each lane writes one compact schema-v3 checkpoint before it returns. A complete
 checkpoint owns a strict typed terminal report of its scope, coverage, churn,
 probes, candidates, verified claims, and limitations, and prevents duplicate
-work; the Workflow returns only completion receipts. Lane candidates contain
+work; the authored `workflow` tool returns only completion receipts. Lane candidates contain
 evidence and remediation facts but no severity, category, status, identifier,
 or verdict. An incomplete checkpoint records reviewed and remaining manifest
 entry indexes, reproduced observations, next steps, and limitations. The same
-native Eve Workflow can start a fresh built-in subagent that reconciles that
+authored Eve workflow starts a fresh built-in subagent that reconciles that
 packet with the immutable manifest, without inheriting the prior model history.
 This reuses the checkpoint-and-reconcile semantics of Milestone Rush; it does
 not introduce another workflow runtime or state service.
+
+Application code owns the lane/scout loop through `defineWorkflowTool` and
+`ctx.agent`. Trusted session context fixes axes, identity and plan. The model
+supplies one bounded common claim/context field, treated as a hypothesis below
+that authority. Each lane copies an application-issued checkpoint attestation
+into its strict native task result. The attestation binds the signed checkpoint
+to the root session, native invocation, axis, attempt, revision and review
+identity. Only a fresh write can authorize incomplete continuation. Complete
+checkpoint reads support authorized recovery without repeating investigation.
+
+Attestations establish what the checkpoint tool validated; they do not replace
+current sandbox reads. Existing recovery and report assembly still require
+every actual signed terminal checkpoint before publication. The workflow
+cannot access the sandbox in Eve 0.52.5, and its partial progress events bypass
+application hooks. Sandbox authority therefore stays in ordinary tools.
+
+Sixteen logical child dispatches are allowed per workflow invocation, matching
+the former experimental tool. Native keys stabilize replay within a run; a
+native hook lock rejects competing active workflow runs for the same root.
+Both orchestration APIs share Eve's at-least-once child-start path. This does
+not promise exactly-once physical execution, a session-wide dispatch budget,
+or recovery across an untested process crash. A failed child never triggers
+an application retry or a partial verdict.
 
 When a lane needs bounded related-source, history, rendered-page, or web
 evidence, the coordinator starts a fresh routed scout and passes its compact

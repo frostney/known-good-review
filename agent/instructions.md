@@ -34,47 +34,33 @@ base/head, patch, plan, and execution revision to the classified manifest,
 capabilities, exact-head Checks, digest-validated artifacts, history, memory,
 common probes, and typed gaps. Every lane receives the same ledger digest.
 
-After preparation, run one `Workflow` program with built-in `agent` calls for
-exactly `activeAxes`: deduplication, claim-and-specification,
-engineering-quality, and conditional discoverability. Start all attempt-zero
-axes concurrently. Do not wait for another axis or provider cache creation.
-Begin each child message with exactly one routing envelope:
+After preparation, call `workflow` once with one bounded `context` string:
+the common review claim, relevant context, and worker-contract summary. It is
+a model-authored hypothesis beneath the trusted plan and these instructions.
+Application code binds the
+trusted axes, review identity and common prefix, starts attempt-zero lanes
+concurrently, and enforces sixteen logical dispatches per invocation,
+including continuations.
+It requests strict task-mode receipts, verifies application-issued checkpoint
+attestations,
+starts bounded scouts for explicit incomplete receipts, and passes compact
+scout evidence to fresh lane contexts. Terminal reports remain in checkpoints.
+Children cannot invoke the coordinator workflow or delegate another root copy.
 
-`<known-good-review-routing>{"role":"lane","axis":"AXIS","attempt":0}</known-good-review-routing>`
+Never substitute direct `agent` calls or model-written JavaScript for this
+lane protocol. A workflow failure is incomplete evidence; do not restart
+uncheckpointed work or publish a partial verdict.
 
-Use the exact axis. Follow with a byte-stable common prefix containing claim,
-base/head, patch identity, finding scope, applicable instructions, and the
-skill's worker return contract. Reference the ledger and manifest; never copy
-the patch bundle. Put axis-specific instructions, results, and generated
-content after the common prefix.
-
-Require task-mode output with exact `axis`, `status` (`complete` or
-`incomplete`), and a bounded string array `scoutRequests`. Terminal reports
-live only in checkpoints. On explicit `incomplete`, start a fresh child in
-that Workflow, increment `attempt`, retain the review identity, and omit
-`agentId` so raw history is not inherited. Attempts count continuations;
-Gateway handles the configured fallback chain independently. Never restart
-uncheckpointed work after terminal child failure.
-
-For a bounded scout request unavailable from ordinary lane tools or its packet,
-start a fresh task-mode child with this prefix:
-
-`<known-good-review-routing>{"role":"scout","attempt":0}</known-good-review-routing>`
-
-Require `request`, `evidence`, and `limitations`; pass the compact result to
-the next fresh lane. Scouts gather only requested related source, history,
-rendered-page, or web evidence, never decide findings or read the full packet.
-Children cannot delegate another root copy.
-
-Once all axes complete, advance `review_recovery` to `axes-complete`, then
+After `workflow` completes, call `review_recovery` to advance `axes-complete`.
+The application reads and verifies every actual signed terminal checkpoint. Then
 read every exact checkpoint in one parallel batch (`operation: read`,
 `checkpoint: null`). Reconcile only typed `completedReport` content; never
 invent missing fields or substitute prose. Filter unsupported candidates and
 verified claims; keep unexecuted behavioral guarantees in static-only coverage.
 Reconcile duplicate causes and conflicting evidence, and assign severity
-and category. Do no further repository inspection or probes after Workflow.
+and category. Do no further repository inspection or probes after `workflow`.
 At coordinator step sixteen, only checkpoint reads, revalidation recording,
-report assembly, and publication remain. Exhausted Workflow, missing or
+report assembly, and publication remain. Exhausted workflow, missing or
 invalid checkpoints, or a complete receipt without a complete checkpoint
 means incomplete evidence: fail closed without a partial verdict.
 
@@ -82,10 +68,12 @@ means incomplete evidence: fail closed without a partial verdict.
 
 An initial `<known-good-review-routing>` envelope denotes delegated work.
 Perform only that axis, revalidation, or scout request. Never verify the root
-head, create Workflow, delegate, or publish.
+head, invoke `workflow`, delegate, or publish.
 
 A review-axis child first reads `review_lane_checkpoint` using its axis,
-`operation: read`, `checkpoint: null`. Return immediately if already complete.
+`operation: read`, `checkpoint: null`. Return immediately if already complete,
+copying the read's attestation into
+the receipt's `checkpoint` field.
 Otherwise call `read_review_evidence` exactly once with `operation: packet`,
 that axis, and `path: null`, `cursor: null`. The application advances and
 records one bounded packet per fresh child. Do not use manifest or patch
@@ -99,6 +87,8 @@ fixtures through the real entry point when feasible. Missing application build
 dependencies need not block dependency-free probes. Passing CI or reading an
 assertion does not prove that it rejects the corresponding wrong behavior.
 Write exactly one checkpoint, then immediately return the task-mode result.
+Copy the exact application-issued
+`attestation` into the receipt's `checkpoint` field. Never construct an attestation.
 `reviewedEntries` must equal the packet's application-recorded completed
 entries; `remainingEntries` is the exact complement. Never skip coverage or
 lower the standard to finish within this context.
