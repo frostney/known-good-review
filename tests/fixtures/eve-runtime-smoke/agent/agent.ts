@@ -1,0 +1,70 @@
+import { defineAgent, defineDynamic } from "eve";
+import { currentReviewRoute } from "../../../../agent/lib/review-route";
+import {
+  mockModel,
+  type MockModelRequest,
+  type MockModelResponse,
+} from "eve/evals";
+import { routingEnvelope } from "../../../../src/models/routing";
+
+const subagentRoutingMarker = "KGR-EVAL-SUBAGENT-ROUTING";
+const subagentChildMarker = "KGR-EVAL-SUBAGENT-CHILD";
+
+function hasToolResult(request: MockModelRequest, name: string): boolean {
+  return request.toolResults.some((result) => result.name === name);
+}
+
+function respond(request: MockModelRequest): MockModelResponse | string {
+  const prompt = request.userMessages.join("\n");
+
+  if (prompt.includes(subagentChildMarker)) {
+    return hasToolResult(request, "fixture_step")
+      ? "SUBAGENT-CHILD-COMPLETE"
+      : {
+          toolCalls: [
+            {
+              name: "fixture_step",
+              input: { marker: "routing" },
+            },
+          ],
+        };
+  }
+
+  if (prompt.includes(subagentRoutingMarker)) {
+    return hasToolResult(request, "agent")
+      ? "SUBAGENT-ROUTING-COMPLETE"
+      : {
+          toolCalls: [
+            {
+              name: "agent",
+              input: {
+                message: `${routingEnvelope({
+                  role: "lane",
+                  axis: "engineering-quality",
+                  attempt: 0,
+                })}\n${subagentChildMarker}`,
+              },
+            },
+          ],
+        };
+  }
+
+  return "UNKNOWN-EVAL-SCENARIO";
+}
+
+const model = mockModel({
+  modelId: "known-good-review-runtime-smoke",
+  provider: "known-good-review-fixture",
+  respond,
+});
+
+export default defineAgent({
+  model: defineDynamic({
+    events: {
+      "step.started": (_event, ctx) => {
+        currentReviewRoute(ctx.channel.kind, ctx.messages);
+        return { model, modelContextWindowTokens: 1_000_000 };
+      },
+    },
+  }),
+});
