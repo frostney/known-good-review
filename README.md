@@ -149,6 +149,13 @@ another model call.
 The publication tool accepts no report or target from the model. It loads only
 the application-staged report after exact review identity validation.
 
+Telemetry uses Eve's experimental instrumentation providers with input and
+output capture disabled for every audience. Native model-call identities join
+usage and Gateway metadata in durable session state. Session hooks own accounting,
+Gateway reconciliation, publication, and recovery; they retain protocol usage
+when a provider cannot record an observation. Cache-inclusive SDK totals and
+Gateway-native accounting categories remain separate.
+
 ## Local development
 
 Requirements are Bun 1.4.2 and the runtime prerequisites selected by Eve's

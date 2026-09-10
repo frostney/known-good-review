@@ -137,6 +137,7 @@ const model = mockModel({
 });
 
 export default defineAgent({
+  experimental: { instrumentationProviders: true },
   model: defineDynamic({
     events: {
       "step.started": (_event, ctx) => {

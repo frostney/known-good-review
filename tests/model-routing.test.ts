@@ -3,7 +3,7 @@ import { currentReviewRoute, requireReviewLane, reviewRouteState } from "../agen
 import type { ReviewRoute } from "../src/models/routing";
 import type { ModelMessage } from "ai";
 import type { InstrumentationStepStartedEventInput } from "eve/instrumentation";
-import instrumentation from "../agent/instrumentation";
+import instrumentation from "../agent/instrumentation/routing";
 import {
   routingAttribute,
   routingEnvelope,
@@ -110,7 +110,7 @@ describe("dynamic Eve model routing", () => {
         channel: { kind: "subagent" },
         modelInput: { messages: childMessage(routingEnvelope({ role: "lane", axis: "deduplication", attempt })) },
       } as unknown as InstrumentationStepStartedEventInput;
-      expect(instrumentation.events?.["step.started"]?.(event)?.runtimeContext)
+      expect(instrumentation.runtimeContext?.(event))
         .toMatchObject({
           "review.requested_model": "moonshotai/kimi-k3",
           "review.fallback_models": ["openai/gpt-5.6-sol"],

@@ -4,6 +4,7 @@ import { selectRoutedModel } from "../src/models/routing";
 import { reviewExecutionRootBudget } from "../src/review/execution-budget";
 
 export default defineAgent({
+  experimental: { instrumentationProviders: true },
   model: defineDynamic({
     events: {
       "step.started": (_event, ctx) =>
