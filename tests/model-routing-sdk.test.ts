@@ -6,12 +6,11 @@ import { reviewAxes } from "../src/review/axes";
 import { routingAttribute, routingEnvelope } from "../src/models/routing";
 // Exercise the installed SDK boundary, so changes to its generated prompt or
 // resolver context fail offline before a deployment can spend model tokens.
-import { ContextContainer, contextStorage } from "../node_modules/eve/dist/src/context/container.js";
+import { ContextContainer, contextStorage, serializeContext, deserializeContext } from "./fixtures/eve-context";
 import { buildResolveContext } from "../node_modules/eve/dist/src/context/dynamic-resolve-context.js";
 import { AuthKey, SessionIdKey } from "../node_modules/eve/dist/src/context/keys.js";
-import { serializeContext, deserializeContext } from "../node_modules/eve/dist/src/context/serialize.js";
-import { SUBAGENT_ADAPTER } from "../node_modules/eve/dist/src/execution/subagent-adapter.js";
-import { buildSubagentRunInput } from "../node_modules/eve/dist/src/execution/subagent-tool.js";
+import { SUBAGENT_ADAPTER } from "../node_modules/eve/dist/src/subagents/adapter.js";
+import { buildSubagentRunInput } from "../node_modules/eve/dist/src/subagents/tool.js";
 import { normalizeModelMessages, normalizeUserContent } from "../node_modules/eve/dist/src/harness/messages.js";
 import { ChannelKey } from "../node_modules/eve/dist/src/runtime/sessions/runtime-context-keys.js";
 import { parseJsonObject } from "../node_modules/eve/dist/src/shared/json.js";
@@ -35,7 +34,7 @@ function sdkChild(message: string) {
       callId: "fixture-delegation", description: "Review lane", input: toolInput,
       kind: "subagent-call", name: "agent", nodeId: "root", subagentName: "agent",
     },
-    auth, initiatorAuth: auth,
+    auth, initiatorAuth: auth, selfAgent: true,
     batchEvent: { sequence: 0, turnId: "fixture-parent-turn" },
     session: {
       agent: { dynamicModel: true, system: "", tools: [] },

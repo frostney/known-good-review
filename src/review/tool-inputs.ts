@@ -3,13 +3,11 @@ import { reviewFindingSchema } from "./findings";
 import { reviewReportDraftSchema } from "./report-assembly";
 
 export const assembleReviewReportInputSchema = z
-  .object({
+  .strictObject({
     draft: reviewReportDraftSchema,
-  })
-  .strict();
+  });
 
 export const recordReviewRevalidationInputSchema = z
-  .object({
+  .strictObject({
     findings: z.array(reviewFindingSchema).max(100),
-  })
-  .strict();
+  });

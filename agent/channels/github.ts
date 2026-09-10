@@ -66,7 +66,7 @@ const permissionSchema = z.object({ permission: z.string() });
 const repositoryDetailsSchema = z.object({
   id: z.number().int().positive(),
   node_id: z.string().min(1),
-  created_at: z.string().datetime(),
+  created_at: z.iso.datetime(),
 });
 const checkRunsSchema = z.object({
   check_runs: z.array(

@@ -1,7 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
 import type { HookContext, HookEvent } from "eve/hooks";
-import { ContextContainer, contextStorage } from "../node_modules/eve/dist/src/context/container.js";
-import { serializeContext, deserializeContext } from "../node_modules/eve/dist/src/context/serialize.js";
+import { ContextContainer, contextStorage, serializeContext, deserializeContext } from "./fixtures/eve-context";
 import usageCapture from "./fixtures/pr65-telemetry-usage.json";
 import telemetry from "../agent/hooks/telemetry";
 

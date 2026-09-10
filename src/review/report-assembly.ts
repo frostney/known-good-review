@@ -70,7 +70,7 @@ export type ReportAssemblyIdentity = z.infer<
 >;
 
 export const reviewReportDraftSchema = z
-  .object({
+  .strictObject({
     scope: z.object({
       claim: z.string(),
       dirtyState: z.string(),
@@ -90,8 +90,7 @@ export const reviewReportDraftSchema = z
     freshFindings: z.array(reviewFindingDraftSchema),
     verifiedClaims: z.array(z.string()),
     limitations: z.array(z.string()),
-  })
-  .strict();
+  });
 
 export type ReviewReportDraft = z.infer<typeof reviewReportDraftSchema>;
 

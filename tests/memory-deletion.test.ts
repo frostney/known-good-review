@@ -125,7 +125,7 @@ test("deletes orphan RAG entries and all namespace versions through the installe
     await t.mutation(internal.memoryData.queueReview, { ...review, memoryAdmission: admission.receipt });
     const namespace = `github:${identity.repositoryId}`;
     for (const dimension of [128, 256]) {
-      const rag = new RAG(components.rag, { textEmbeddingModel: gateway.embedding("openai/text-embedding-3-small"), embeddingDimension: dimension });
+      const rag = new RAG(components.rag, { textEmbeddingModel: gateway.embeddingModel("openai/text-embedding-3-small"), embeddingDimension: dimension });
       await t.action((ctx) => rag.add(ctx, {
         namespace, key: "orphan", title: "Interrupted application write",
         chunks: [{ text: "orphan fixture", embedding: Array.from({ length: dimension }, () => 1 / Math.sqrt(dimension)) }],

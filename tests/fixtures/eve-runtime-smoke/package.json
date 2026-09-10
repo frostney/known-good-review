@@ -1,5 +1,8 @@
 {
   "name": "known-good-review-eve-runtime-smoke",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "eve": "0.52.5"
+  }
 }

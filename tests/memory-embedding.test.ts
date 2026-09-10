@@ -88,7 +88,7 @@ test("reuses unchanged text while search reflects current metadata and excludes 
     })).toEqual([]);
     // Simulate an interrupted action between RAG.add and recordMemory. Search
     // must not surface metadata that the app has never committed.
-    const rag = new RAG(components.rag, { textEmbeddingModel: gateway.embedding(embedding.model), embeddingDimension: 128 });
+    const rag = new RAG(components.rag, { textEmbeddingModel: gateway.embeddingModel(embedding.model), embeddingDimension: 128 });
     await t.run(async (ctx) => {
       await rag.add(ctx, { namespace: `github:${identity.repositoryId}`, key: "orphan",
         chunks: [{ text: "orphaned finding", embedding: [1, ...Array<number>(127).fill(0)] }],

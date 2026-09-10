@@ -100,7 +100,7 @@ export const reviewRecoveryStateSchema = z
 export type ReviewRecoveryState = z.infer<typeof reviewRecoveryStateSchema>;
 
 export const reviewFailureEnvelopeSchema = z
-  .object({
+  .strictObject({
     schemaVersion: z.literal(1),
     executionRevision: z.literal("review-recovery-v1"),
     baseSha: revisionSchema,
@@ -124,7 +124,6 @@ export const reviewFailureEnvelopeSchema = z
       turnId: safeCorrelationSchema,
     }),
   })
-  .strict()
   .superRefine((failure, context) => {
     const active = new Set(failure.activeAxes);
     const completed = new Set(failure.completedAxes);
