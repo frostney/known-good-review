@@ -253,7 +253,7 @@ export async function writeLaneCheckpoint(
   if (prior?.status === "complete") {
     if (
       parsedContent.status === "complete" &&
-      JSON.stringify(laneCheckpointContentSchema.parse(prior)) ===
+      JSON.stringify(laneCheckpointContentSchema.strip().parse(prior)) ===
         JSON.stringify(parsedContent)
     ) {
       return prior;

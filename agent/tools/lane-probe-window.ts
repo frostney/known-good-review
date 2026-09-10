@@ -46,7 +46,6 @@ export default defineDynamic({
           }),
         });
         return {
-          Workflow: blocked,
           agent: blocked,
           ask_question: blocked,
           bash: blocked,

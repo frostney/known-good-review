@@ -24,9 +24,10 @@ export default defineEval({
     child.calledTool("fixture_step", { count: 1, input: { marker: "routing" } });
     child.messageIncludes("SUBAGENT-CHILD-COMPLETE");
 
-    t.succeeded();
-    t.noFailedActions();
-    t.calledSubagent("agent", {
+    const initial = await t.target.attachSession(t.sessionId);
+    initial.succeeded();
+    turn.noFailedActions();
+    initial.calledSubagent("agent", {
       count: 1,
     });
     t.eventOrder([
@@ -40,14 +41,56 @@ export default defineEval({
     // returns. This also proves Eve builds and executes without an app SDK pin.
     const workflowTurn = await t.send("KGR-EVAL-WORKFLOW-ROUTING");
     workflowTurn.expectOk();
-    t.calledTool("fixture_workflow", { count: 1 });
+    workflowTurn.calledTool("fixture_workflow", { count: 1 });
     t.messageIncludes("WORKFLOW-ROUTING-COMPLETE");
-    t.noFailedActions();
+    workflowTurn.noFailedActions();
     const workflowDelegation = workflowTurn.events.find((event) => event.type === "subagent.called");
     if (!workflowDelegation) throw new Error("Expected a Workflow child session");
     const workflowChild = await t.target.attachSession(workflowDelegation.data.childSessionId);
     workflowChild.succeeded();
     workflowChild.calledTool("fixture_step", { count: 1, input: { marker: "routing" } });
     workflowChild.messageIncludes("SUBAGENT-CHILD-COMPLETE");
+
+    const authored = await t.send("KGR-EVAL-AUTHORED-ROOT");
+    authored.expectOk();
+    authored.calledTool("review_workflow", { count: 1 });
+    t.messageIncludes("AUTHORED-REVIEW-COMPLETE");
+    authored.noFailedActions();
+    const children = authored.events.filter((event) => event.type === "subagent.called");
+    if (new Set(children.map((event) => event.data.childSessionId)).size !== 5) throw new Error("Expected three lanes, one scout, and a fresh continuation");
+    for (const event of children) {
+      const child = await t.target.attachSession(event.data.childSessionId);
+      child.succeeded();
+    }
+
+    const repeated = await t.send("KGR-EVAL-AUTHORED-REPEAT");
+    repeated.messageIncludes("AUTHORED-REPLAY-COMPLETE");
+    repeated.noFailedActions();
+    const repeatedChildren = repeated.events.filter((event) => event.type === "subagent.called");
+    if (new Set(repeatedChildren.map((event) => event.data.childSessionId)).size !== 3) throw new Error("Same-root replay did not reuse complete checkpoints");
+
+    const guardedSession = t.newSession();
+    const guarded = await guardedSession.send("KGR-EVAL-ROOT-GUARD");
+    guarded.messageIncludes("ROOT-GUARD-COMPLETE");
+    const guardedChildren = guarded.events.filter((event) => event.type === "subagent.called");
+    if (guardedChildren.length !== 1 || !guardedChildren[0]) throw new Error("Nested orchestration dispatched grandchildren");
+    const guardedChild = await t.target.attachSession(guardedChildren[0].data.childSessionId);
+    guardedChild.succeeded();
+    guardedChild.calledTool("review_workflow", { status: "failed", count: 1 });
+    guardedChild.notCalledTool("agent");
+
+    const concurrentSession = t.newSession();
+    const concurrent = await concurrentSession.send("KGR-EVAL-CONCURRENT-ROOT");
+    concurrent.messageIncludes("CONCURRENT-GUARD-COMPLETE");
+    const concurrentChildren = concurrent.events.filter((event) => event.type === "subagent.called");
+    if (new Set(concurrentChildren.map((event) => event.data.childSessionId)).size !== 5) throw new Error("Concurrent invocation admitted duplicate lanes");
+
+    const windowSession = t.newSession();
+    const window = await windowSession.send("KGR-EVAL-WINDOW-ROOT");
+    window.event("turn.failed");
+    const requested = window.events.find((event) => event.type === "actions.requested" && event.data.actions.some((action) => "toolName" in action && action.toolName === "review_workflow"));
+    if (!requested || requested.type !== "actions.requested" || requested.data.stepIndex !== 16) throw new Error("Workflow cutoff was not exercised at step sixteen");
+    if (window.events.some((event) => event.type === "subagent.called")) throw new Error("Workflow cutoff dispatched a child");
+    if (!JSON.stringify(window.events).includes("further workflow dispatch is forbidden")) throw new Error("Workflow cutoff did not fail through the application hook");
   },
 });
