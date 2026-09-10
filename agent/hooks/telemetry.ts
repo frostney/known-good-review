@@ -1,4 +1,5 @@
 import { defineState } from "eve/context";
+import { modelObservations } from "../lib/model-observations";
 import { recordTurnUsage, summarizeTurnUsage, type TurnUsageState } from "../../src/telemetry/turn-usage";
 import { getReviewEvidenceSandbox } from "../lib/evidence-sandbox";
 import { defineHook, type HookContext } from "eve/hooks";
@@ -109,6 +110,11 @@ function logCompletedModel(
   observation: PendingGatewayTelemetry,
   generation: ReconciledGatewayTelemetry | null,
 ): void {
+  const observedModel = observation.actualModel;
+  const actualModel = generation?.actualModel ?? (
+    observedModel && `${observation.provider}/${observedModel}` !== observation.requestedModel
+      ? observedModel : observation.requestedModel
+  );
   console.info(
     JSON.stringify({
       event: "known-good-review.model.completed",
@@ -122,11 +128,9 @@ function logCompletedModel(
       attempt: observation.attempt,
       memoryPolicyHash: observation.memoryPolicyHash,
       requestedModel: observation.requestedModel,
-      actualModel: generation?.actualModel ?? observation.requestedModel,
-      fallbackUsed:
-        generation !== null &&
-        generation.actualModel !== observation.requestedModel,
-      provider: generation?.provider ?? null,
+      actualModel,
+      fallbackUsed: actualModel !== observation.requestedModel,
+      provider: generation?.provider ?? observation.provider ?? null,
       generationId: observation.generationId || null,
       inputTokens: generation?.inputTokens ?? observation.inputTokens,
       outputTokens: generation?.outputTokens ?? observation.outputTokens,
@@ -181,6 +185,30 @@ async function reconcilePendingGatewayTelemetry(
         error: error instanceof Error ? error.name : "unknown",
       }),
     );
+  }
+}
+
+function recordModelObservation(observation: PendingGatewayTelemetry): void {
+  const previous = turnUsage.get();
+  const next = recordTurnUsage(previous, observation);
+  if (next === previous) return;
+  turnUsage.update(() => next);
+  if (observation.generationId) enqueueGatewayTelemetry(observation);
+  else logCompletedModel(observation, null);
+}
+
+function recordNativeObservations(ctx: HookContext, turnId: string): void {
+  for (const observation of modelObservations.get()) {
+    if (!observation.completed || observation.sessionId !== ctx.session.id || observation.turnId !== turnId) continue;
+    const step = stepRoutes.get()[stepKey(ctx.session.id, turnId, observation.stepIndex)];
+    const route = step?.route ?? executionRoute(ctx.channel.kind);
+    recordModelObservation({
+      ...observation,
+      requestedModel: step?.requestedModel ?? "unknown",
+      reviewKind: reviewKind(ctx.session.auth.current?.attributes ?? {}),
+      phase: reviewPhase(route), reviewAxis: reviewAxis(route), attempt: route.attempt,
+      memoryPolicyHash: memoryPolicyHash(),
+    });
   }
 }
 
@@ -324,8 +352,11 @@ function logTurnUsage(sessionId: string, turnId: string): void {
   );
 }
 
-function finishTurnTracking(sessionId: string, turnId: string, preservePublication = false): boolean {
+function finishTurnTracking(ctx: HookContext, turnId: string, preservePublication = false): boolean {
+  const sessionId = ctx.session.id;
+  recordNativeObservations(ctx, turnId);
   logTurnUsage(sessionId, turnId);
+  modelObservations.update(current => current.filter(observation => observation.turnId !== turnId));
   const key = turnKey(sessionId, turnId);
   stepRoutes.update((current) => Object.fromEntries(
     Object.entries(current).filter(([step]) => !step.startsWith(`${key}:`)),
@@ -443,17 +474,31 @@ export default defineHook({
         cacheWriteTokens: event.data.usage?.cacheWriteTokens ?? null,
         costUsd: event.data.usage?.costUsd ?? null,
       };
-      turnUsage.update((current) => recordTurnUsage(current, {
-        eventId: observation.eventId, sessionId: observation.sessionId,
-        turnId: observation.turnId, stepIndex: observation.stepIndex,
-        generationId: observation.generationId, inputTokens: observation.inputTokens,
-        outputTokens: observation.outputTokens, cacheReadTokens: observation.cacheReadTokens,
-        cacheWriteTokens: observation.cacheWriteTokens, costUsd: observation.costUsd,
-      }));
-      if (generationId) {
-        enqueueGatewayTelemetry(observation);
-      } else {
-        logCompletedModel(observation, null);
+      const native = modelObservations.get().filter(candidate =>
+        candidate.sessionId === ctx.session.id && candidate.turnId === event.data.turnId &&
+        candidate.stepIndex === event.data.stepIndex);
+      const finalCall = native[native.length - 1];
+      const finalCallMatches = finalCall?.completed === true && (
+        !finalCall.generationId || !observation.generationId ||
+        finalCall.generationId === observation.generationId
+      );
+      if (native.length > 0) {
+        for (const candidate of native) {
+          if (!candidate.completed) continue;
+          const isFinalCall = finalCallMatches && candidate.eventId === finalCall.eventId;
+          const enriched = {
+            ...candidate,
+            generationId: candidate.generationId || (isFinalCall ? observation.generationId : ""),
+            costUsd: candidate.costUsd ?? (isFinalCall ? observation.costUsd : null),
+          };
+          modelObservations.update(current => current.map(entry =>
+            entry.eventId === candidate.eventId ? enriched : entry));
+          recordModelObservation({ ...observation, ...enriched });
+        }
+      }
+      if (!finalCallMatches) {
+        // Failure-isolated providers cannot be the sole accounting authority.
+        recordModelObservation(observation);
       }
     },
     "step.failed"(event, ctx) {
@@ -486,7 +531,7 @@ export default defineHook({
       );
     },
     async "turn.failed"(event, ctx) {
-      finishTurnTracking(ctx.session.id, event.data.turnId);
+      finishTurnTracking(ctx, event.data.turnId);
       if (!isLifecycleOwner(ctx)) {
         return;
       }
@@ -552,7 +597,7 @@ export default defineHook({
       }
     },
     async "turn.completed"(event, ctx) {
-      const published = finishTurnTracking(ctx.session.id, event.data.turnId, true);
+      const published = finishTurnTracking(ctx, event.data.turnId, true);
       if (!isLifecycleOwner(ctx)) {
         return;
       }
@@ -604,7 +649,7 @@ export default defineHook({
       }
     },
     async "turn.cancelled"(event, ctx) {
-      finishTurnTracking(ctx.session.id, event.data.turnId);
+      finishTurnTracking(ctx, event.data.turnId);
       if (!isLifecycleOwner(ctx)) {
         return;
       }

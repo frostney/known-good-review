@@ -26,6 +26,8 @@ export interface PendingGatewayTelemetry {
   readonly attempt: number;
   readonly memoryPolicyHash: string;
   readonly requestedModel: string;
+  readonly actualModel?: string | null;
+  readonly provider?: string | null;
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
   readonly cacheReadTokens: number | null;
