@@ -215,6 +215,13 @@ pull requests read/write, issues read/write, and checks read/write. Forward
 `pull_request`, `issue_comment`, `installation`, and
 `installation_repositories` events through Connect to `/eve/v1/github`.
 
+A GitHub API `401` evicts only the matching Connect token cache entry and
+retries once through the native token resolver. A second `401`, a permission
+failure, a network failure, or a rejected Connect exchange remains terminal.
+Chat requests retain explicit installation scoping; Eve channel requests retain
+the connector's default app context. Review admission retains its overall
+deadline and does not force a new Connect exchange on every review.
+
 The single GitHub route verifies installation lifecycle events with the same
 Connect OIDC verifier as Eve. Before a review can later enqueue memory, it
 captures a Convex admission receipt and then verifies that the installation
