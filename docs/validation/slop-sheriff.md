@@ -91,3 +91,43 @@ must compare the same exact revisions and requirements, preserve canonical
 finding and revalidation outcomes, and report phase latency, input/output
 and cache tokens, and cost. Existing replay measurements describe recorded
 production data, not observed performance of this new policy.
+
+## Public launch extension (10 September 2026)
+
+Reviewed the launch delta from `153174e` plus the earlier recorded runtime
+review. Active axes: reuse, claim/specification, engineering quality and public
+web discoverability. The extension adds a native Eve home channel, static
+landing responses and image bytes, install/deployment documentation, and artwork.
+It does not change review tools, lane schemas, authentication or model routing.
+No outstanding Blocking or Important implementation finding remains.
+
+`bun run check` passed 272 tests, 32 deterministic Eve runtime gates, zero
+Eve discovery errors/warnings, and the production build. `bun run replay:pr61`
+preserved all four recorded finding transitions. Logs are retained locally as
+`/tmp/slop-sheriff-launch-check.log` and `/tmp/slop-sheriff-launch-replay.log`.
+
+Compiled HTTP probes exercised GET/HEAD, robots and sitemap, exact asset hashes,
+unknown-path rejection, and the existing Eve health route. The literal robots
+route uses Rou3's literal group syntax because Eve/Nitro treated a virtual
+handler ending in `.txt` as text and returned 500; the corrected compiled route
+returns 200 at `/robots.txt` and rejects the literal braces URL.
+
+Browser QA checked desktop and 390×844 layouts, loaded images, no horizontal
+mobile overflow, native keyboard expansion of the example finding, and readable
+installation/configuration content. The synthetic example is labelled and
+contains no customer code. The hero export is 143,968 bytes; the App icon is
+59,841 bytes. Social preview is 1280×640 JPEG and under 1 MB.
+
+Production indexing requires both production deployment metadata and the exact
+canonical hostname. Preview, local, candidate, and old aliases remain noindex.
+Documentation links accept only a 40-hex deployment revision before embedding
+it in the GitHub URL. Asset equivalence checks reject stale generated bundles.
+The native JSON import is necessary because source-relative file reads fail
+when Eve relocates authored modules; no second web framework was introduced.
+
+A 90-day file-history review found README changes across 15 commits, primarily
+accumulated feature documentation; deployment guidance had one prior addition.
+The landing module/channel/tests are new. No recurring repair pattern or mixed
+runtime responsibility was found in the added module. Earlier runtime churn
+and review evidence remain in the preceding sections. Hosted rollout and the
+single paid pilot are separate validation stages, not inferred from these checks.

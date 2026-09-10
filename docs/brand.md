@@ -38,11 +38,24 @@ patterns. These standards also apply to Slop Sheriff's own comments.
   badge, with no text.
 
 Use charcoal, parchment, terracotta, brass, and turquoise. Keep the cowboy hat,
-star badge, and plain notebook. The artwork has no book titles or subtitles.
+star badge, and notebook. Only the banner has lettering on its props: the sign
+says “Clean code →” and both books say “Review Notes”. The avatar stays text-free.
+Code-shaped tracks are recessed into the sand with displaced edges and shadows.
 Both assets were generated for this project and revised to the owner's brief.
 Use smooth fills and clean outlines, without grain or distressed paper texture.
 The built-in image tool generated these assets; it does not report its model
 version, so no specific model version is claimed.
+
+Exports for the launch are a 200×200 PNG App/README icon, a 1280×640 JPEG
+social preview, and an optimized WebP hero. The PNG and JPEG uploads are each
+under 1 MB. Regenerate the website asset bundle after changing exports with
+`bun src/landing/export-assets.ts`.
+
+The September 10 banner edit used the built-in ImageGen tool with the existing
+banner as reference: retain the character, wordmark, layout and clean fills;
+add the approved sign/book wording only to the banner; impress code-shaped
+tracks into the sand with ridges and contact shadows. Resize/encoding exports
+use sips and cwebp; they do not change the artwork.
 
 ## Operational migration
 

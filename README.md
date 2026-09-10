@@ -1,6 +1,6 @@
 # Slop Sheriff
 
-![Slop Sheriff robot with a cowboy hat and blank notebook](docs/assets/slop-sheriff-brand.png)
+![Slop Sheriff robot with a cowboy hat, Review Notes book, and desert trail](docs/assets/slop-sheriff-brand.png)
 
 **Slop Sheriff** is a review-only GitHub App built as a standalone Eve
 application. It runs on Vercel, uses Vercel AI Gateway for models, inspects pull
@@ -8,6 +8,11 @@ requests inside Vercel Sandbox, receives GitHub App events through Eve's native
 GitHub channel, and publishes aggregate and per-axis Checks, one visible result
 summary, and stable inline finding threads through the official Chat SDK GitHub
 adapter's typed Octokit surface.
+
+[Meet the sheriff](https://slop-sheriff.vercel.app) · [Self-hosting instructions](docs/install.md)
+
+Run your own sheriff on your own Vercel, Gateway and Convex accounts. There is
+no public hosted installation service.
 
 ## Lifecycle
 
@@ -161,7 +166,7 @@ Each active review axis receives its own Check Run under `slop-sheriff`.
 Existing `known-good-review` Checks and state remain readable during migration.
 The old command names also remain accepted.
 
-Each active review axis receives its own Check Run. Axis Checks report
+Axis Checks report
 execution health only: in progress while working, success after complete
 evidence coverage, skipped when a conditional axis does not apply, and
 action-required when an active axis cannot complete. The aggregate Check owns
@@ -225,10 +230,10 @@ delete.
 
 ## External setup
 
-For this audit release, follow the [app-first rollout and live validation
-procedure](docs/deployment.md), including the app/backend compatibility gate.
+Start with the [self-hosting instructions](docs/install.md), then use the
+[deployment and live validation guide](docs/deployment.md) for rollout.
 
-Provision the Connect-backed GitHub App with Eve's current setup flow, create
+Provision your Connect-backed GitHub App with the documented Connect commands, create
 the Convex deployment, deploy the app to Vercel, and install it on selected
 repositories. Set `KNOWN_GOOD_REVIEW_EVIDENCE_KEY` in the app environment to
 32 random bytes encoded as 64 hexadecimal characters. Keep it stable across
