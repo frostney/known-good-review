@@ -27,6 +27,7 @@ const validFinding = {
   location: { path: "src/review.ts", line: 1, symbol: null },
   evidence: ["The model-facing schema rejects application-owned status."],
   impact: "Invalid review output cannot reach application state.",
+  impactSummary: "Invalid review output cannot reach application state.",
   remedy: "Keep the provider-visible schema aligned with the tool boundary.",
   staticOnly: true,
   churn: null,

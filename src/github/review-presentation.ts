@@ -3,7 +3,9 @@ import type { ReviewConfig, ReviewProfile } from "../config/review-config";
 import { findingIdentity } from "../review/finding-identity";
 import {
   deterministicFindingPresentation,
+  renderPlainText,
   renderRichText,
+  renderSafeRichText,
 } from "./deterministic-presentation";
 
 const severityEmoji: Readonly<Record<ReviewFinding["severity"], string>> = {
@@ -73,6 +75,7 @@ function titleCase(value: string): string {
 export function findingBody(
   finding: ReviewFinding,
   placement: "file" | "line" = "line",
+  personality = true,
 ): string {
   const presentation = deterministicFindingPresentation(finding);
   const status = finding.status === "open" ? "Open" : titleCase(finding.status);
@@ -92,7 +95,14 @@ export function findingBody(
       .map((evidence) => `- ${renderRichText(evidence)}`)
       .join("\n"),
     "",
-    `Impact: ${renderRichText(presentation.impact)}`,
+    `Impact: ${renderPlainText(presentation.impactSummary)}`,
+    "",
+    "<details>",
+    `<summary>${personality ? "The full rundown" : "Full impact analysis"}</summary>`,
+    "",
+    renderSafeRichText(presentation.impact),
+    "",
+    "</details>",
     "",
     `Smallest remedy: ${renderRichText(presentation.remedy)}`,
   ].join("\n");
@@ -100,7 +110,7 @@ export function findingBody(
 
 export function reviewResultBody(
   report: ReviewReport,
-  config: Pick<ReviewConfig, "blocking" | "profile"> = {
+  config: Pick<ReviewConfig, "blocking" | "profile"> & { readonly personality?: boolean | undefined } = {
     blocking: false,
     profile: "balanced",
   },
@@ -111,10 +121,10 @@ export function reviewResultBody(
     (finding) => finding.severity === "BLOCKING" || finding.severity === "IMPORTANT",
   );
   const heading = config.blocking && hasBlocking
-    ? "## ❌ known-good-review: changes requested"
+    ? "## ❌ Slop Sheriff: changes requested"
     : active.length === 0
-      ? "## ✅ known-good-review: approved"
-      : "## 💬 known-good-review: review complete";
+      ? "## ✅ Slop Sheriff: approved"
+      : "## 💬 Slop Sheriff: review complete";
   const result =
     active.length === 0
       ? "No findings were reported."
@@ -122,6 +132,7 @@ export function reviewResultBody(
   return [
     heading,
     "",
+    ...(config.personality === false ? [] : ["Patrol complete.", ""]),
     result,
     "",
     reviewFindingCountSummary(report, config.profile),
@@ -132,30 +143,31 @@ export function reviewResultBody(
 
 export function reviewProgressBody(
   status: "completed" | "debouncing" | "failed" | "never" | "running",
+  personality = true,
 ): string {
   if (status === "debouncing") {
     return [
-      "## ⏳ known-good-review: accepted",
+      "## ⏳ Slop Sheriff: accepted",
       "",
       "The review is queued for its debounce window.",
     ].join("\n");
   }
   if (status === "running") {
     return [
-      "## ⏳ known-good-review: in progress",
+      "## ⏳ Slop Sheriff: in progress",
       "",
-      "The review is currently running.",
+      personality ? "The sheriff is on patrol. Review in progress." : "The review is currently running.",
     ].join("\n");
   }
   if (status === "failed" || status === "completed") {
     return [
-      "## ❌ known-good-review: review incomplete",
+      "## ❌ Slop Sheriff: review incomplete",
       "",
       "The review did not complete. See the Check Run for details.",
     ].join("\n");
   }
   return [
-    "## ⏸️ known-good-review: not started",
+    "## ⏸️ Slop Sheriff: not started",
     "",
     "No review has started yet.",
   ].join("\n");

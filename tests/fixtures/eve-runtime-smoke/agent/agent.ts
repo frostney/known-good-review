@@ -8,6 +8,7 @@ import {
 } from "eve/evals";
 import { routingEnvelope } from "../../../../src/models/routing";
 import { parseSubagentRoute } from "../../../../src/models/routing";
+import { reviewTaskInstructions } from "../../../../src/review/policy";
 
 const subagentRoutingMarker = "KGR-EVAL-SUBAGENT-ROUTING";
 const subagentChildMarker = "KGR-EVAL-SUBAGENT-CHILD";
@@ -19,6 +20,19 @@ function hasToolResult(request: MockModelRequest, name: string): boolean {
 
 function respond(request: MockModelRequest): MockModelResponse | string {
   const prompt = request.userMessages.join("\n");
+  const system = request.messages.filter((message) => message.role === "system").map((message) => message.text).join("\n");
+  if (!system.includes("Slop Sheriff")) throw new Error("Production role instructions were not resolved by Eve");
+
+  if (prompt.includes("KGR-EVAL-ROLE-CHILD")) {
+    if (!prompt.includes("Freeze these expectations before running the candidate") || system.includes("Call workflow once")) throw new Error("Specialist inherited the wrong role policy");
+    return "ROLE-CHILD-COMPLETE";
+  }
+  if (prompt.includes("KGR-EVAL-ROLE-ROOT")) {
+    if (!system.includes("Call workflow once")) throw new Error("Coordinator policy was replaced by child policy");
+    const result = request.toolResults.find((item) => item.name === "fixture_workflow");
+    if (result) return JSON.stringify(result.output).includes("ROLE-CHILD-COMPLETE") ? "ROLE-RESOLUTION-COMPLETE" : "ROLE-RESOLUTION-FAILED";
+    return { toolCalls: [{ name: "fixture_workflow", input: { message: `${routingEnvelope({ role: "lane", axis: "test-health", attempt: 0 })}\n${reviewTaskInstructions({ role: "lane", axis: "test-health", attempt: 0 })}\nKGR-EVAL-ROLE-CHILD` } }] };
+  }
 
   if (prompt.includes("KGR-EVAL-WINDOW-ROOT")) {
     if (!hasToolResult(request, "fixture_window")) return { toolCalls: [{ name: "fixture_window", input: {} }] };
@@ -52,6 +66,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     if (route.attempt === 1 && !prompt.includes("found-symbol")) throw new Error("Fresh continuation lost scout evidence");
     if (!hasToolResult(request, "fixture_checkpoint")) return { toolCalls: [{ name: "fixture_checkpoint", input: {} }] };
     const checkpointResult = request.toolResults.find((item) => item.name === "fixture_checkpoint");
+    if (checkpointResult?.isError) throw new Error(`Synthetic checkpoint tool failed: ${JSON.stringify(checkpointResult.output)}`);
     const checkpoint = z.object({ attestation: z.string(), status: z.enum(["in-progress", "complete"]) }).parse(checkpointResult?.output);
     const incomplete = checkpoint.status === "in-progress";
     return { toolCalls: [{ name: "final_output", input: { axis: route.axis, status: incomplete ? "incomplete" : "complete", scoutRequests: incomplete ? ["lookup"] : [], checkpoint: checkpoint.attestation } }] };

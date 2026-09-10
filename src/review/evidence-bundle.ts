@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { ReviewAxis } from "./axes";
 import { reviewAxes } from "./axes";
+import { specialistEntryScope } from "./specialist-scope";
 
 const revisionSchema = z.string().regex(/^[a-f0-9]{40}$/);
 const fingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -126,6 +127,8 @@ const packetEntrySchema = z.object({
   characterOffset: z.number().int().nonnegative(),
   content: z.string().optional(),
   nextCharacterOffset: z.number().int().nonnegative().nullable(),
+  obligation: z.string().optional(),
+  patchOmissionReason: z.string().optional(),
 });
 
 const reviewEvidencePacketSchema = z.object({
@@ -390,6 +393,7 @@ async function buildReviewEvidencePacket(
   sandbox: ReviewEvidenceSandbox,
   manifest: ReviewEvidenceManifest,
   progress: ReviewEvidenceProgress,
+  axis: ReviewAxis,
 ) {
   validateReviewEvidenceProgress(progress, manifest);
   if (progress.cursor === null) {
@@ -409,12 +413,14 @@ async function buildReviewEvidencePacket(
   while (entryIndex < manifest.entries.length) {
     const entry = manifest.entries[entryIndex];
     if (!entry) break;
-    if (entry.kind === "excluded") {
+    const scope = specialistEntryScope(axis, entry.path);
+    if (entry.kind === "excluded" || scope?.includePatch === false) {
       entries.push({
         index: entryIndex,
         entry,
         characterOffset: 0,
         nextCharacterOffset: null,
+        ...(scope ? { obligation: scope.obligation, patchOmissionReason: entry.kind === "excluded" ? `Trusted-base classification: ${entry.classification.join(", ")}` : scope.reason } : {}),
       });
       completedEntries.push(entryIndex);
       entryIndex += 1;
@@ -433,6 +439,7 @@ async function buildReviewEvidencePacket(
       characterOffset,
       content: patch.content,
       nextCharacterOffset: patch.nextCursor,
+      ...(scope ? { obligation: scope.obligation } : {}),
     });
     remainingCharacters -= patch.content.length;
     if (patch.nextCursor !== null) {
@@ -478,7 +485,7 @@ export async function readNextReviewEvidencePacket(
   if (existingReceipt !== null) {
     const receipt = packetReceiptSchema.parse(JSON.parse(existingReceipt));
     const expected = await buildReviewEvidencePacket(
-      sandbox, manifest, receipt.before,
+      sandbox, manifest, receipt.before, axis,
     );
     if (
       JSON.stringify(receipt.packet) !== JSON.stringify(expected) ||
@@ -515,7 +522,7 @@ export async function readNextReviewEvidencePacket(
   ))) {
     throw new Error("Review evidence progress is missing its checkpoint-bound receipt");
   }
-  const packet = await buildReviewEvidencePacket(sandbox, manifest, before);
+  const packet = await buildReviewEvidencePacket(sandbox, manifest, before, axis);
   const after = reviewEvidenceProgressSchema.parse({
     cursor: packet.nextCursor,
     completedEntries: packet.completedEntries,

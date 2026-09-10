@@ -66,6 +66,7 @@ function completedLaneReport(
     candidates: [],
     verifiedClaims: ["The review path remains read-only."],
     limitations: [],
+    specialistChecks: null,
   };
 }
 
@@ -141,6 +142,7 @@ describe("review evidence bundle", () => {
         "location",
         "evidence",
         "impact",
+        "impactSummary",
         "remedy",
         "staticOnly",
         "churn",

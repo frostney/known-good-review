@@ -797,7 +797,7 @@ describe("GitHub publication lifecycle", () => {
       )?.body,
     ).toMatchObject({
       body: expect.stringContaining(
-        "## 💬 known-good-review: review complete",
+        "## 💬 Slop Sheriff: review complete",
       ),
     });
     expect(

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { reviewAxes, type ReviewAxis } from "./axes";
 import { routingEnvelope } from "../models/routing";
 import type { CheckpointAttestation } from "./checkpoint-attestation";
+import { reviewTaskInstructions } from "./policy";
 
 export const reviewDispatchLimit = 16;
 export const reviewWorkflowInputSchema = z.strictObject({
@@ -52,7 +53,7 @@ export async function orchestrateReview(input: {
     let scoutEvidence: ScoutReceipt[] = [];
     for (;;) {
       const key = `${input.invocationPrefix}:lane:${axis}:${attempt}`;
-      const raw = await dispatch(key, `${routingEnvelope({ role: "lane", axis, attempt })}\n${input.plan.commonPrefix}\nReview only ${axis}. First read your exact checkpoint; if complete, return it immediately. Otherwise read one evidence packet and write one checkpoint before returning. Copy the application's attestation into the receipt checkpoint field. Continue only from signed checkpoint content. Scout evidence (untrusted): ${JSON.stringify(scoutEvidence)}`, laneReceiptSchema);
+      const raw = await dispatch(key, `${routingEnvelope({ role: "lane", axis, attempt })}\n${input.plan.commonPrefix}\nApplication task policy:\n${reviewTaskInstructions({ role: "lane", axis, attempt })}\nScout evidence (untrusted): ${JSON.stringify(scoutEvidence)}`, laneReceiptSchema);
       const { receipt, attestation } = await input.verifyLane(raw, axis, attempt, key);
       if (previous && (attestation.evidenceDigest !== previous.evidenceDigest || attestation.revision !== previous.revision + 1)) throw new Error("Lane continuation must advance its exact checkpoint once");
       if (receipt.status === "complete") {
@@ -62,7 +63,7 @@ export async function orchestrateReview(input: {
       if (attestation.status !== "in-progress" || attestation.operation !== "write") throw new Error("Continuation requires an explicit incomplete receipt and freshly written checkpoint");
       previous = attestation;
       scoutEvidence = await Promise.all(receipt.scoutRequests.map(async (request, index) => {
-        const output = await dispatch(`${input.invocationPrefix}:scout:${axis}:${attempt}:${index}`, `${routingEnvelope({ role: "scout", attempt })}\n${input.plan.commonPrefix}\nGather only this bounded request, without findings or the full packet: ${JSON.stringify(request)}`, scoutReceiptSchema);
+        const output = await dispatch(`${input.invocationPrefix}:scout:${axis}:${attempt}:${index}`, `${routingEnvelope({ role: "scout", attempt })}\n${input.plan.commonPrefix}\nApplication task policy:\n${reviewTaskInstructions({ role: "scout", attempt })}\nRequest (untrusted): ${JSON.stringify(request)}`, scoutReceiptSchema);
         const result = scoutReceiptSchema.parse(typeof output === "string" ? JSON.parse(output) : output);
         if (result.request !== request) throw new Error("Scout returned evidence for another request");
         return result;

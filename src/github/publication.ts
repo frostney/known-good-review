@@ -43,7 +43,9 @@ function validateFindingPresentation(report: ReviewReport): void {
   }
 }
 
-export const checkName = "known-good-review";
+export const checkName = "slop-sheriff";
+export const legacyCheckName = "known-good-review";
+export const reviewCheckNames = [checkName, legacyCheckName] as const;
 export function axisCheckName(axis: ReviewAxis): string {
   return `${checkName} / ${axis}`;
 }
@@ -57,7 +59,7 @@ export function activeReviewExternalId(
   review: ActiveReviewIdentity,
 ): string {
   return [
-    checkName,
+    legacyCheckName,
     context.pullRequest,
     context.baseSha,
     context.headSha,
@@ -78,7 +80,7 @@ export function parseActiveReviewExternalId(
     externalId.split(":");
   if (
     extra !== undefined ||
-    name !== checkName ||
+    !reviewCheckNames.some((candidate) => candidate === name) ||
     pullRequest !== String(expected.pullRequest) ||
     baseSha !== expected.baseSha ||
     headSha !== expected.headSha
@@ -177,7 +179,7 @@ function inactiveTimelineFindingBody(id: string): string {
     `<!-- known-good-review:retired-finding:${id} -->`,
     "### ✅ No longer active",
     "",
-    "The current known-good-review result no longer reports this finding.",
+    "The current Slop Sheriff result no longer reports this finding.",
   ].join("\n");
 }
 
@@ -224,7 +226,7 @@ function conclusionFor(
 
 function checkSummary(
   report: ReviewReport,
-  config: Pick<ReviewConfig, "blocking" | "profile">,
+  config: Pick<ReviewConfig, "blocking" | "profile"> & Partial<Pick<ReviewConfig, "personality">>,
 ): string {
   const published = publishedFindings(report, config.profile);
   const active = report.findings.filter((finding) => finding.status !== "fixed");
@@ -246,15 +248,18 @@ async function latestCheck(
   context: Omit<TrustedGitHubContext, "patchFingerprint">,
   name = checkName,
 ) {
-  const listed = await octokit.rest.checks.listForRef({
-    owner: context.owner,
-    repo: context.repo,
-    ref: context.headSha,
-    check_name: name,
-    per_page: 100,
-  });
-  return [...listed.data.check_runs]
-    .filter((check) => check.name === name)
+  const names = [name, name.replace(/^slop-sheriff(?= \/|$)/, legacyCheckName)];
+  const listed = await Promise.all([...new Set(names)].map((check_name) =>
+    octokit.rest.checks.listForRef({
+      owner: context.owner,
+      repo: context.repo,
+      ref: context.headSha,
+      check_name,
+      per_page: 100,
+    }),
+  ));
+  return listed.flatMap((page) => page.data.check_runs)
+    .filter((check) => names.includes(check.name))
     .sort((left, right) => right.id - left.id)[0];
 }
 
@@ -262,7 +267,7 @@ async function upsertCheck(
   octokit: OctokitClient,
   context: TrustedGitHubContext,
   report: ReviewReport,
-  config: Pick<ReviewConfig, "blocking" | "profile">,
+  config: Pick<ReviewConfig, "blocking" | "profile"> & Partial<Pick<ReviewConfig, "personality">>,
   forcedConclusion?: "action_required",
 ) {
   const existing = await latestCheck(octokit, context);
@@ -275,10 +280,10 @@ async function upsertCheck(
     completed_at: new Date().toISOString(),
     output: {
       title: forcedConclusion === "action_required"
-        ? "known-good-review: review incomplete"
+        ? "Slop Sheriff: review incomplete"
         : config.blocking && hasBlockingFinding(report)
-        ? "known-good-review: changes requested"
-        : "known-good-review: review complete",
+        ? "Slop Sheriff: changes requested"
+        : "Slop Sheriff: review complete",
       summary: (forcedConclusion === "action_required"
         ? [
           "Policy result: **REVIEW INCOMPLETE**",
@@ -323,7 +328,7 @@ export async function publishInProgressCheck(input: {
     status: "in_progress" as const,
     started_at: new Date().toISOString(),
     output: {
-      title: "known-good-review: review in progress",
+      title: "Slop Sheriff: review in progress",
       summary: `A ${input.review.kind} review was accepted and is currently running.`,
     },
   };
@@ -571,7 +576,7 @@ async function createReviewThreads(
   context: TrustedGitHubContext,
   threads: readonly NewReviewThread[],
   report: ReviewReport,
-  config: Pick<ReviewConfig, "blocking" | "profile">,
+  config: Pick<ReviewConfig, "blocking" | "profile"> & Partial<Pick<ReviewConfig, "personality">>,
 ): Promise<void> {
   if (threads.length === 0 && !config.blocking) return;
   await deleteViewerPendingReviews(octokit, context);
@@ -734,7 +739,7 @@ async function reconcileFindingComments(
   octokit: OctokitClient,
   context: TrustedGitHubContext,
   report: ReviewReport,
-  config: Pick<ReviewConfig, "blocking" | "profile">,
+  config: Pick<ReviewConfig, "blocking" | "profile"> & Partial<Pick<ReviewConfig, "personality">>,
   files: readonly PullRequestFileForComment[],
 ): Promise<() => Promise<void>> {
   const comments = (await octokit.paginate(octokit.rest.pulls.listReviewComments, {
@@ -775,7 +780,7 @@ async function reconcileFindingComments(
   for (const finding of findings) {
     const identity = findingIdentity(finding);
     const location = reviewCommentLocation(finding, files);
-    const body = findingBody(finding, location.subjectType);
+    const body = findingBody(finding, location.subjectType, config.personality);
     const prior = existing.get(identity);
     if (prior && sameCommentLocation(prior, finding, location)) {
       if (prior.body !== body) {
@@ -1028,7 +1033,7 @@ export async function stageReviewPublication(input: {
   const next: ReviewState = {
     ...(current ?? {
       schemaVersion: 2 as const,
-      app: checkName,
+      app: legacyCheckName,
       pullRequest: input.context.pullRequest,
       initialFullStatus: "running" as const,
       baseline: null,
@@ -1090,7 +1095,7 @@ export async function writeReviewFailureState(input: {
   await writeReviewState(input.octokit, input.context, {
     ...(current ?? {
       schemaVersion: 2 as const,
-      app: checkName,
+      app: legacyCheckName,
       pullRequest: input.context.pullRequest,
       initialFullStatus: "failed" as const,
       baseline: null,
@@ -1121,7 +1126,7 @@ async function verifyPublicationHead(
 }
 
 export async function publishReview(input: {
-  readonly config?: Pick<ReviewConfig, "blocking" | "profile">;
+  readonly config?: Pick<ReviewConfig, "blocking" | "profile"> & Partial<Pick<ReviewConfig, "personality">>;
   readonly context: TrustedGitHubContext;
   readonly octokit: OctokitClient;
   readonly reconcileFindings?: boolean;
@@ -1192,7 +1197,7 @@ export async function publishReview(input: {
   await verifyPublicationHead(input.octokit, input.context);
   await writeReviewState(input.octokit, input.context, {
     schemaVersion: 2,
-    app: checkName,
+    app: legacyCheckName,
     pullRequest: input.context.pullRequest,
     initialFullStatus: "completed",
     publication: config,
@@ -1303,7 +1308,7 @@ export async function publishBudgetExhaustedCheck(input: {
     conclusion: "action_required" as const,
     completed_at: new Date().toISOString(),
     output: {
-      title: "known-good-review: review incomplete",
+      title: "Slop Sheriff: review incomplete",
       summary: [
         "The review stopped without publishing a verdict because its review execution budget was exhausted.",
         "",

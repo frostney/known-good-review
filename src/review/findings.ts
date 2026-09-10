@@ -23,12 +23,16 @@ export const findingChurnSchema = z
     coSignals: z.array(z.string()),
   });
 
+export const findingImpactSummarySchema = z.string().min(1).max(300)
+  .describe("Plain-text consequence summary, at most 300 characters. Preserve the full analysis in impact.");
+
 export const reviewFindingEvidenceSchema = z
   .strictObject({
     title: z.string().min(1),
     location: findingLocationSchema,
     evidence: z.array(z.string().min(1)).min(1),
     impact: z.string().min(1),
+    impactSummary: findingImpactSummarySchema.optional(),
     remedy: z.string().min(1),
     staticOnly: z.boolean(),
   });
@@ -36,6 +40,7 @@ export const reviewFindingEvidenceSchema = z
 const findingDraftBaseShape = {
   severity: z.enum(["BLOCKING", "IMPORTANT", "IMPROVEMENT", "NITPICK"]),
   ...reviewFindingEvidenceSchema.shape,
+  impactSummary: findingImpactSummarySchema,
 };
 
 const claimFindingDraftSchema = z
@@ -73,6 +78,8 @@ export const reviewFindingDraftSchema = z.discriminatedUnion("category", [
 const canonicalFindingShape = {
   id: z.string().regex(/^CR-[1-9]\d*$/),
   status: z.enum(["open", "fixed", "deferred"]),
+  // Reports and revalidation can carry findings recorded before summaries existed.
+  impactSummary: findingImpactSummarySchema.optional(),
 };
 
 export const reviewFindingSchema = z.discriminatedUnion("category", [

@@ -1,0 +1,124 @@
+{
+  "method": "o200k_base authored policy text; first-turn child standing policy plus app-authored task message. Excludes unchanged trusted common prefix, framework/tool schemas, evidence, generated history and provider cache. Static inventory, not runtime/quality evidence.",
+  "baselineRevision": "b1e10994224000a79cae97cbc281193fd58dab13",
+  "baseline": {
+    "instructions": {
+      "bytes": 9987,
+      "tokens": 1973
+    },
+    "runtimeSkill": {
+      "bytes": 19937,
+      "tokens": 4068
+    }
+  },
+  "candidate": {
+    "coordinator": {
+      "bytes": 4252,
+      "tokens": 762
+    },
+    "initialChildStanding": {
+      "bytes": 3131,
+      "tokens": 559
+    },
+    "lanes": [
+      {
+        "axis": "deduplication",
+        "taskMessage": {
+          "bytes": 2483,
+          "tokens": 432
+        },
+        "initialPolicyTokens": 991,
+        "boundTurnStanding": {
+          "bytes": 4931,
+          "tokens": 866
+        }
+      },
+      {
+        "axis": "claim-and-specification",
+        "taskMessage": {
+          "bytes": 2455,
+          "tokens": 434
+        },
+        "initialPolicyTokens": 993,
+        "boundTurnStanding": {
+          "bytes": 4903,
+          "tokens": 868
+        }
+      },
+      {
+        "axis": "engineering-quality",
+        "taskMessage": {
+          "bytes": 2978,
+          "tokens": 525
+        },
+        "initialPolicyTokens": 1084,
+        "boundTurnStanding": {
+          "bytes": 5426,
+          "tokens": 959
+        }
+      },
+      {
+        "axis": "discoverability",
+        "taskMessage": {
+          "bytes": 2363,
+          "tokens": 416
+        },
+        "initialPolicyTokens": 975,
+        "boundTurnStanding": {
+          "bytes": 4811,
+          "tokens": 850
+        }
+      },
+      {
+        "axis": "test-against-spec",
+        "taskMessage": {
+          "bytes": 3617,
+          "tokens": 652
+        },
+        "initialPolicyTokens": 1211,
+        "boundTurnStanding": {
+          "bytes": 6065,
+          "tokens": 1086
+        }
+      },
+      {
+        "axis": "writing-quality",
+        "taskMessage": {
+          "bytes": 3252,
+          "tokens": 573
+        },
+        "initialPolicyTokens": 1132,
+        "boundTurnStanding": {
+          "bytes": 5700,
+          "tokens": 1007
+        }
+      },
+      {
+        "axis": "test-health",
+        "taskMessage": {
+          "bytes": 4029,
+          "tokens": 693
+        },
+        "initialPolicyTokens": 1252,
+        "boundTurnStanding": {
+          "bytes": 6477,
+          "tokens": 1127
+        }
+      }
+    ],
+    "optionalRuntimeSkill": {
+      "bytes": 2287,
+      "tokens": 422
+    }
+  },
+  "oneInitialCallPerRole": {
+    "nonPublicCode": {
+      "baseline": 7892,
+      "candidate": 7425
+    },
+    "publicCode": {
+      "baseline": 9865,
+      "candidate": 8400
+    }
+  }
+}

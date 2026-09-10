@@ -48,8 +48,43 @@ report whose repository, PR, base, head, patch, and plan match trusted context.
 
 ## Review execution
 
-The coordinator loads the vendored `code-review` skill and maps active axes
-one-to-one to Eve's built-in subagent. After the root revalidates the exact PR
+Slop Sheriff selects a locally authored role policy for each Eve turn. The
+existing authored workflow maps trusted active axes one-to-one to Eve root
+copies, preserving their shared sandbox, signed checkpoints and bounded scout
+continuations. Core deduplication, claim/specification, engineering-quality
+and conditional discoverability coverage remains intact. A test-against-spec
+lane records explicit-requirement behavior through real interfaces; a writing
+lane activates for potentially authored prose, UI strings or comments.
+A conditional test-health lane inspects changed or affected tests as a frozen
+external contract: establish consumer expectations before the implementation,
+then check meaningful public outcomes, failure sensitivity and tolerance of
+behavior-preserving refactors. It never derives expectations from the current
+implementation or changes tests to make observed behavior pass. Engineering
+quality retains its existing test-value coverage; spec testing judges product
+behavior, while test health judges the independence and reliability of tests.
+
+Eve 0.52.5 resolves turn instructions before appending the incoming child
+message. The first child turn therefore receives fixed child authority and
+the exact application-authored task policy in its routed dispatch message.
+Later turns can select the durable bound role. Coordinator procedure never
+enters first-child system context. The deterministic runtime smoke imports the
+production resolver and verifies this lifecycle against the native mock model.
+
+Specialist packets preserve every manifest index and its coverage obligation.
+Spec packets include potential specification patches and implementation
+metadata; omitted patches never establish behavioral success. Writing packets
+omit known binary/lock payloads while retaining explicit classification work.
+Test-health packets include potential test and contract sources, with metadata
+for implementation/dependency entries and an obligation to locate affected
+consumer-facing tests.
+Every completed specialist report classifies all manifest entries with
+passed, failed, unverified or out-of-scope evidence. Failed and unverified
+results remain in canonical probes and limitations through deterministic
+assembly. Core packets still include the complete classified review scope.
+The sixteen-dispatch limit includes new lanes and continuations; exhaustion
+fails closed without reducing coverage or silently raising the limit.
+
+After the root revalidates the exact PR
 head, an Eve `action.result` hook performs one application-owned preparation
 phase without putting preparation commands or raw patches in model history.
 Its immutable ledger binds the trusted repository, pull request, base, head,
@@ -268,12 +303,16 @@ cancelled turns release their transient tracking and flush observed usage.
 Eve caps the complete review execution tree at 8,000,000 provider-reported
 input tokens and 512,000 output tokens. Child sessions receive shares of the
 root's remaining quota, and their completed usage is charged back to the root.
-The input cap leaves about 1,985,000 tokens for each lane when the coordinator
-uses 60,000 tokens before the four-way fan-out. A 2,000,000-token root cap left
+Historically, the input cap left about 1,985,000 tokens for each lane when the
+coordinator used 60,000 tokens before a four-way fan-out. A 2,000,000-token root cap left
 only 485,000 tokens per lane and stopped a full review before publication, even
 though sibling lanes still had unused shares. Provider-reported aggregate run
 usage must not be reused as the root quota because Eve divides that quota
 before the parallel lanes run.
+The current plan may activate seven lanes sharing that same root cap. Their
+smaller shares do not authorize reduced coverage, a larger budget or a partial
+verdict. The four-lane numbers above explain the historical configuration;
+they are not current per-lane guarantees.
 Cached input is a subset reported separately for telemetry, not an amount added
 again to input usage. Fresh full and delta roots run in task mode so the cap
 cannot be renewed through a conversation continuation. Exhaustion publishes an

@@ -5,6 +5,12 @@ export default defineEval({
     "Proves the compiled Eve server can stream a routed root-copy child through production instrumentation.",
   tags: ["mock-model", "runtime-smoke"],
   async test(t) {
+    const roleSession = t.newSession();
+    const roleTurn = await roleSession.send("KGR-EVAL-ROLE-ROOT");
+    roleTurn.expectOk();
+    roleTurn.messageIncludes("ROLE-RESOLUTION-COMPLETE");
+    roleTurn.noFailedActions();
+
     let turn = await t.send("KGR-EVAL-SUBAGENT-ROUTING");
     if (!t.sessionId) throw new Error("Expected a root session");
     // Delegation returns a working receipt in Eve 0.52. Continue reading the

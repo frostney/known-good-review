@@ -87,7 +87,7 @@ describe("native GitHub review presentation", () => {
 
   test("shows a complete result when no findings qualify", () => {
     const body = reviewResultBody(report([]));
-    expect(body).toContain("## ✅ known-good-review: approved");
+    expect(body).toContain("## ✅ Slop Sheriff: approved");
     expect(body).toContain("No findings were reported.");
     expect(body).toContain("🚨 0 blocking · ⚠️ 0 important · 💡 0 improvements");
   });
@@ -142,16 +142,16 @@ describe("native GitHub review presentation", () => {
   test("requests changes only when blocking policy has a material finding", () => {
     const important = report([finding("IMPORTANT")]);
     expect(reviewResultBody(important)).toContain(
-      "## 💬 known-good-review: review complete",
+      "## 💬 Slop Sheriff: review complete",
     );
     expect(
       reviewResultBody(important, { blocking: true, profile: "balanced" }),
-    ).toContain("## ❌ known-good-review: changes requested");
+    ).toContain("## ❌ Slop Sheriff: changes requested");
 
     const nitpick = report([finding("NITPICK")]);
     expect(
       reviewResultBody(nitpick, { blocking: true, profile: "thorough" }),
-    ).toContain("## 💬 known-good-review: review complete");
+    ).toContain("## 💬 Slop Sheriff: review complete");
   });
 
   test("uses the left side for a finding on a deleted line", () => {

@@ -1,8 +1,22 @@
 # Skill provenance
 
-All project and runtime skills were installed with the owner-maintained Skills
-CLI (`skills` 1.5.22). No skill directory was populated with an ad-hoc file copy.
-`skills-lock.json` records hashes computed with the CLI's content-hash algorithm.
+Project development skills were installed with the owner-maintained Skills
+CLI (`skills` 1.5.22). `skills-lock.json` records their hashes computed with the
+CLI's content-hash algorithm. Runtime review policy is authored locally.
+
+## Slop Sheriff runtime policy
+
+`agent/instructions.ts` selects the locally authored role policy from
+`src/review/policy.ts`. The optional `agent/skills/review-policy/` guide
+provides deeper investigation prompts. Application code owns axes, scoped
+evidence delivery, signed checkpoints, orchestration, recovery and publication.
+No runtime policy is installed or refreshed from known-good-route.
+
+The review principles acknowledge known-good-route's `code-review`,
+`test-against-spec` and writing guidance at revision
+`4bb09419189430000711893b7ed10ad7d22c6211` (Unlicense OR MIT). This is attribution,
+not an execution dependency. The development `code-review` entry in
+`skills-lock.json` still describes `.agents/skills/code-review`, not the runtime.
 
 ## known-good-route
 
@@ -22,15 +36,13 @@ uses all-candidate collection before coordinator filtering; and upgrades both
 `code-review` and `codebase-audit` findings JSON to schema version 2 with no v1
 reader or migration.
 
-The complete `code-review` skill, including all four references, is installed
-into `agent/skills/code-review` for Eve. The Skills CLI normalizes its
-frontmatter for Eve; its procedure and references come from the same current
-known-good-route source as the development copy. The applicable project-local
-suite under `.agents/skills` now also includes `agent-writing` and
+The historical runtime copy of `code-review` and its references has been
+replaced by the locally authored policy above. The project-local development
+suite under `.agents/skills` still includes `code-review`, `agent-writing` and
 `typescript-stack`. The catalog's Convex, React, and FreePascal stack skills are
 not installed because they do not apply to this repository. `skills-lock.json`
 records `frostney/known-good-route` as the source and the Skills CLI content hash
-for every installed skill; this repository does not author those skills.
+for those installed development skills; this repository does not author them.
 
 ## mattpocock/skills
 
