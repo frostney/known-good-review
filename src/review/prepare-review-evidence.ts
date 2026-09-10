@@ -30,6 +30,7 @@ import {
   resetReviewEvidence,
   reviewEvidenceDirectory,
   reviewFileStatusSchema,
+  reviewEvidenceManifestSchema,
   type ReviewEvidenceManifest,
   writeIncludedReviewEvidence,
   writeReviewEvidenceManifest,
@@ -318,13 +319,15 @@ export async function prepareReviewEvidence(
   } finally {
     await sandbox.run({ command: `rm -f -- ${shellQuote(indexPath)}` });
   }
-  const manifest: ReviewEvidenceManifest = {
+  // Use the persisted schema shape for every digest and common-work identity.
+  // Excluded entries are assembled above in a different property order.
+  const manifest = reviewEvidenceManifestSchema.parse({
     schemaVersion: 1,
     baseSha: trusted.baseSha,
     headSha: trusted.headSha,
     patchFingerprint: trusted.patchFingerprint,
     entries,
-  };
+  });
   await writeReviewEvidenceManifest(sandbox, manifest);
   const capabilities = await runCapabilityPreflight(sandbox, identity);
   if (capabilities.created) {

@@ -131,3 +131,51 @@ The landing module/channel/tests are new. No recurring repair pattern or mixed
 runtime responsibility was found in the added module. Earlier runtime churn
 and review evidence remain in the preceding sections. Hosted rollout and the
 single paid pilot are separate validation stages, not inferred from these checks.
+
+## Self-review pilot and evidence repair (10 September 2026)
+
+The public site and renamed App were deployed from `1dedabe9fdf8b3a0a8f3cd4d87167590278f1225`.
+Both public domains passed health checks; the new domain has canonical indexing
+and the old alias remains noindex. The existing App and Vercel project retained
+their identities and credentials. The App icon and repository social image were
+saved. Actions read access and access to this repository were explicitly approved
+for the pilot.
+
+The one paid advisory pilot failed. All seven lanes rejected the prepared
+evidence packet with `Prepared evidence components failed ledger validation`.
+The resulting missing checkpoint caused the authored workflow's output-schema
+failure. The bot published an incomplete summary and action-required Checks,
+without a finding verdict. Root execution lasted 125.851 seconds; common
+preparation took 51.524 seconds and the authored workflow call 39.882 seconds.
+These are failure timings, not a completed-review benchmark.
+
+The regression now runs real Git preparation through lane packet reads, with
+included source, generated files and a binary image. It reproduced the same
+ledger rejection before the fix. Excluded entries were hashed before schema
+parsing changed their property order; readers hashed the parsed representation.
+Preparation and digest boundaries now use the same schema-parsed manifest.
+All seven lane packets and prepared-snapshot reuse pass. Changed evidence still
+fails validation. The previous empty-manifest tool fixture missed this boundary.
+
+`bun run check` passed 272 tests, 32 native Eve gates, zero discovery diagnostics
+and the production build after the repair. `bun run replay:pr61` preserved all
+four recorded finding transitions. The bounded repair review covered reuse,
+the exact failure claim and integrity enforcement; no unresolved Blocking or
+Important repair finding remains. The 90-day Git history shows earlier evidence
+preparation and concurrency changes; this fix changes no lane contract, model
+routing or publication behavior. The guide also now selects the unmerged launch
+candidate explicitly and treats installation events as automatic subscriptions.
+
+Observed SDK usage for the pilot was 349,921 input and 10,103 output tokens,
+with 282,363 cache-read and 67,460 cache-write tokens included in the input total,
+costing $0.3153972. The separate draft-transition turn added $0.007178. Fifteen
+generation reconciliations remained unresolved at collection time, so these
+are observed SDK totals, not certified billing. Cancelled requests may have
+unreported usage. The draft turn attempted cleanup, which the trusted-plan guard
+rejected before sandbox access; no sandbox-stop failure was observed.
+
+PR42 was returned to draft and the App's access to this repository was removed
+after assessment, pausing automatic self-review. Its access to pascal-mcp-sdk
+and Actions read permission remain. No second paid review or merge was performed.
+Review quality, complete delivery, latency and token savings remain unproven;
+another paid pilot needs separate authorization and restored repository access.

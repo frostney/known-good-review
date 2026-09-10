@@ -14,6 +14,10 @@ and Node 24 for the deployed Eve runtime.
 ```sh
 git clone https://github.com/YOUR-ACCOUNT/slop-sheriff.git
 cd slop-sheriff
+# Launch candidate: PR42 is deployed before merging into main.
+git fetch https://github.com/frostney/slop-sheriff.git refs/pull/42/head
+git switch --create slop-sheriff-launch FETCH_HEAD
+git push --set-upstream origin slop-sheriff-launch
 bun install --frozen-lockfile
 bun run check
 bun run replay:pr61
@@ -24,7 +28,8 @@ pull request in draft until the production setup is complete.
 
 ## 2. Create your infrastructure
 
-Import your fork into a Vercel project in your own team. Select Node 24 and Bun.
+Import your fork into a Vercel project in your own team. Set its production
+branch to `slop-sheriff-launch` for this candidate. Select Node 24 and Bun.
 Link the local checkout with `bun x vercel link`, selecting that existing project.
 Use `bun x convex dev` to create and configure your own Convex project and generate
 its bindings. Stop the development watcher when setup is complete.
@@ -58,9 +63,7 @@ bun x vercel connect create github \
   --name YOUR-UNIQUE-SHERIFF-NAME \
   --triggers --trigger-path /eve/v1/github \
   --trigger-event pull_request \
-  --trigger-event issue_comment \
-  --trigger-event installation \
-  --trigger-event installation_repositories
+  --trigger-event issue_comment
 ```
 
 Complete the GitHub registration steps offered by Connect. Record the connector
@@ -74,9 +77,11 @@ bun x vercel connect attach YOUR-CONNECTOR-UID \
 ```
 
 Verify the App has repository metadata, contents, and Actions **read** access,
-and pull requests, issues, and Checks **read/write** access. Verify Connect
-forwards the four events above to the production project. Keep App credentials
-in Connect; repository sandboxes must never receive them.
+and pull requests, issues, and Checks **read/write** access. GitHub sends
+`installation` and `installation_repositories` events to Apps automatically;
+they cannot be selected as manual subscriptions. Verify Connect forwards those
+lifecycle events as well as PRs and comments to the production project. Keep
+App credentials in Connect; repository sandboxes must never receive them.
 
 Use the App settings' installation page to install **your** App on selected
 repositories. Slop Sheriff's own App is not a public hosted service. Obtain the
