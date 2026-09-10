@@ -1,4 +1,4 @@
-import { connectGitHubCredentials } from "@vercel/connect/eve";
+import { connectedGitHubChannel } from "../../src/github/connect-channel";
 import { evidenceSigningKey } from "../../src/review/authenticated-evidence";
 import {
   defaultGitHubAuth,
@@ -722,10 +722,11 @@ async function onComment(ctx: GitHubInboundContext, comment: GitHubComment) {
   return dispatch;
 }
 
-const githubCredentials = connectGitHubCredentials(githubConnector);
+const { credentials: githubCredentials, api: githubApi } = connectedGitHubChannel(githubConnector);
 const channel = githubChannel({
   botName: "known-good-review",
   credentials: githubCredentials,
+  api: githubApi,
   turnPolicy: "steer",
   progress: { reactions: false },
   onPullRequest,
