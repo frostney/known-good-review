@@ -179,3 +179,29 @@ after assessment, pausing automatic self-review. Its access to pascal-mcp-sdk
 and Actions read permission remain. No second paid review or merge was performed.
 Review quality, complete delivery, latency and token savings remain unproven;
 another paid pilot needs separate authorization and restored repository access.
+
+## Coordinator quota repair (11 September 2026)
+
+The user authorized a second review on `47f820b`, then explicitly asked for
+end-to-end repair and review completion. All seven lanes completed on the
+second run, but the coordinator stopped before reconciliation: Eve charged
+10,283,914 input tokens against the application's 8,000,000-token override.
+The completed workflow itself returned only a compact receipt; the coordinator
+had made 37,778 input tokens of its own calls. The failure was the inherited
+whole-tree quota, not another evidence-ledger or workflow-awaiting failure.
+
+The native mock runtime now reports the recorded descendant input through a
+completed child and requires the same parent to execute its next tool and
+finish. Before the fix, `bun run test:e2e:mock` failed the completion and tool
+assertions. It passes after removing the custom input override and inheriting
+installed Eve 0.52.5's documented 40,000,000-token root default. The separate
+512,000-output-token guard, dispatch window, signed coverage and fail-closed
+publication remain. This changes execution capacity, not review coverage or
+quality criteria, and makes no token-saving claim.
+
+The native test replaces seven tests that duplicated budget arithmetic and
+assumed a four-lane fan-out. The updated suite passes 265 unit/integration tests
+and 35 native Eve gates. The PR61 replay still preserves all four transitions.
+The live retry and completed delivery must be verified separately after deploying
+the exact repaired commit. Local evidence is in `/tmp/slop-sheriff-budget-red.log`,
+`/tmp/slop-sheriff-budget-check.log` and `/tmp/slop-sheriff-budget-replay.log`.

@@ -300,19 +300,16 @@ visible but do not expose prompts or source. Each metadata request has a
 five-second timeout; unresolved records remain pending. Completed, failed and
 cancelled turns release their transient tracking and flush observed usage.
 
-Eve caps the complete review execution tree at 8,000,000 provider-reported
-input tokens and 512,000 output tokens. Child sessions receive shares of the
-root's remaining quota, and their completed usage is charged back to the root.
-Historically, the input cap left about 1,985,000 tokens for each lane when the
-coordinator used 60,000 tokens before a four-way fan-out. A 2,000,000-token root cap left
-only 485,000 tokens per lane and stopped a full review before publication, even
-though sibling lanes still had unused shares. Provider-reported aggregate run
-usage must not be reused as the root quota because Eve divides that quota
-before the parallel lanes run.
-The current plan may activate seven lanes sharing that same root cap. Their
-smaller shares do not authorize reduced coverage, a larger budget or a partial
-verdict. The four-lane numbers above explain the historical configuration;
-they are not current per-lane guarantees.
+The application uses Eve's native root input quota: 40,000,000 provider-reported
+tokens in installed Eve 0.52.5. The separate output guard remains 512,000 tokens.
+Child sessions receive shares of the root's remaining quota, and their completed
+usage is charged back to the root. The former 8,000,000 input override stopped
+PR42's coordinator at 10,283,914 tokens after all seven lanes had completed,
+before reconciliation could run. A deterministic native Eve test now replays
+that descendant usage and verifies the coordinator can execute its next tool
+and finish. It replaces tests that merely repeated local budget arithmetic.
+The quota is an execution guard, not a review-quality or performance target.
+Every selected lane and coverage obligation still has to complete.
 Cached input is a subset reported separately for telemetry, not an amount added
 again to input usage. Fresh full and delta roots run in task mode so the cap
 cannot be renewed through a conversation continuation. Exhaustion publishes an

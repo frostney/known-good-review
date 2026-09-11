@@ -5,6 +5,13 @@ export default defineEval({
     "Proves the compiled Eve server can stream a routed root-copy child through production instrumentation.",
   tags: ["mock-model", "runtime-smoke"],
   async test(t) {
+    const budgetSession = t.newSession();
+    const budget = await budgetSession.send("KGR-EVAL-BUDGET-ROOT");
+    budget.expectOk();
+    budget.messageIncludes("BUDGET-RECONCILIATION-COMPLETE");
+    budget.calledTool("fixture_step", { count: 1 });
+    budget.noFailedActions();
+
     const roleSession = t.newSession();
     const roleTurn = await roleSession.send("KGR-EVAL-ROLE-ROOT");
     roleTurn.expectOk();

@@ -1,8 +1,7 @@
-// Eve grants child sessions shares of the root remainder and charges completed
-// child usage back to the root. These per-session API fields therefore limit
-// ordinary model usage across the review tree. Eve 0.52 does not charge its
-// compaction generations to this budget; it is not a total provider spend cap.
+// Use Eve's native root input default (40M in installed Eve 0.52.5).
+// Its quota includes completed child usage; the former 8M override could stop
+// reconciliation after every lane completed. Retain the separate output guard.
+// Compaction is not charged here, so these limits are not a provider spend cap.
 export const reviewExecutionRootBudget = {
-  maxInputTokensPerSession: 8_000_000,
   maxOutputTokensPerSession: 512_000,
 } as const;

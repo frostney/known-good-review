@@ -9,6 +9,7 @@ import {
 import { routingEnvelope } from "../../../../src/models/routing";
 import { parseSubagentRoute } from "../../../../src/models/routing";
 import { reviewTaskInstructions } from "../../../../src/review/policy";
+import productionAgent from "../../../../agent/agent";
 
 const subagentRoutingMarker = "KGR-EVAL-SUBAGENT-ROUTING";
 const subagentChildMarker = "KGR-EVAL-SUBAGENT-CHILD";
@@ -22,6 +23,16 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   const prompt = request.userMessages.join("\n");
   const system = request.messages.filter((message) => message.role === "system").map((message) => message.text).join("\n");
   if (!system.includes("Slop Sheriff")) throw new Error("Production role instructions were not resolved by Eve");
+
+  if (prompt.includes("KGR-EVAL-BUDGET-CHILD")) {
+    // Recorded PR42 descendant input, aggregated into one terminal child.
+    return { text: "BUDGET-CHILD-COMPLETE", usage: { inputTokens: 10_246_136, outputTokens: 100 } };
+  }
+  if (prompt.includes("KGR-EVAL-BUDGET-ROOT")) {
+    if (!hasToolResult(request, "fixture_workflow")) return { toolCalls: [{ name: "fixture_workflow", input: { message: `${routingEnvelope({ role: "lane", axis: "engineering-quality", attempt: 0 })}\nKGR-EVAL-BUDGET-CHILD` } }] };
+    if (!hasToolResult(request, "fixture_step")) return { toolCalls: [{ name: "fixture_step", input: { marker: "routing" } }] };
+    return "BUDGET-RECONCILIATION-COMPLETE";
+  }
 
   if (prompt.includes("KGR-EVAL-ROLE-CHILD")) {
     if (!prompt.includes("Freeze these expectations before running the candidate") || system.includes("Call workflow once")) throw new Error("Specialist inherited the wrong role policy");
@@ -153,6 +164,7 @@ const model = mockModel({
 
 export default defineAgent({
   experimental: { instrumentationProviders: true },
+  ...(productionAgent.limits ? { limits: productionAgent.limits } : {}),
   model: defineDynamic({
     events: {
       "step.started": (_event, ctx) => {
