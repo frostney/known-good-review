@@ -25,11 +25,14 @@ const check = {
 };
 
 describe("specialist evidence obligations", () => {
-  test.each(["omitted", "excluded"] as const)("%s metadata packets stay bounded and continue without losing obligations", async (kind) => {
+  test.each([
+    ["omitted", "nested/"], ["excluded", "nested/"],
+    ["omitted", 'quote"\n/'], ["excluded", 'quote"\n/'],
+  ] as const)("%s metadata with %j paths stays bounded without losing obligations", async (kind, segment) => {
     const sandbox = sandboxFixture();
     const source = await writeIncludedReviewEvidence(sandbox, { patchFingerprint: identity.patchFingerprint, path: "src/template.ts", patch: "+source\n", patchTokens: 2, status: "modified" });
     const manifest = reviewEvidenceManifestSchema.parse({ schemaVersion: 1, ...identity, entries: Array.from({ length: 2000 }, (_, index) => {
-      const path = `src/${"nested/".repeat(40)}file-${index}.ts`;
+      const path = `src/${segment.repeat(40)}file-${index}.ts`;
       return kind === "omitted"
         ? { ...source, path, patchFile: reviewEvidencePatchFile(identity.patchFingerprint, path).fileName }
         : { ...source, kind: "excluded", path, classification: ["generated"], addedLines: 1, deletedLines: 0 };
