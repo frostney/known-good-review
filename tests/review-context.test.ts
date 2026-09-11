@@ -490,11 +490,12 @@ describe("review evidence bundle", () => {
       0,
     );
     expect(first.entries).toHaveLength(1);
-    expect(first.entries[0]?.content).toHaveLength(500_000);
+    expect(JSON.stringify(first).length).toBeLessThanOrEqual(500_000);
+    expect(first.entries[0]?.content?.length).toBeGreaterThan(0);
     expect(first.completedEntries).toEqual([]);
     expect(first.nextCursor).toEqual({
       entryIndex: 0,
-      characterOffset: 500_000,
+      characterOffset: first.entries[0]?.content?.length ?? 0,
     });
     expect(
       await readNextReviewEvidencePacket(
@@ -520,7 +521,8 @@ describe("review evidence bundle", () => {
       "session-two",
       1,
     );
-    expect(second.entries[0]?.content).toHaveLength(100_000);
+    expect(JSON.stringify(second).length).toBeLessThanOrEqual(500_000);
+    expect((first.entries[0]?.content ?? "") + (second.entries[0]?.content ?? "")).toBe("x".repeat(600_000));
     expect(second.completedEntries).toEqual([0]);
     expect(second.nextCursor).toBeNull();
     expect(

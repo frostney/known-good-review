@@ -1,11 +1,17 @@
+import { createHash } from "node:crypto";
 import bundledAssets from "./assets.json";
 import { landingPage, siteOrigin } from "./page";
 
+function imageAsset(type: string, base64: string) {
+  const bytes = Buffer.from(base64, "base64");
+  return { type, bytes, etag: `"${createHash("sha256").update(bytes).digest("hex")}"` };
+}
+
 // A fixed allowlist serves compiled bytes without exposing repository files.
 const assets = new Map([
-  ["/assets/slop-sheriff-hero.webp", { type: "image/webp", bytes: Buffer.from(bundledAssets["slop-sheriff-hero.webp"], "base64") }],
-  ["/assets/slop-sheriff-icon.png", { type: "image/png", bytes: Buffer.from(bundledAssets["slop-sheriff-icon.png"], "base64") }],
-  ["/assets/slop-sheriff-social.jpg", { type: "image/jpeg", bytes: Buffer.from(bundledAssets["slop-sheriff-social.jpg"], "base64") }],
+  ["/assets/slop-sheriff-hero.webp", imageAsset("image/webp", bundledAssets["slop-sheriff-hero.webp"])],
+  ["/assets/slop-sheriff-icon.png", imageAsset("image/png", bundledAssets["slop-sheriff-icon.png"])],
+  ["/assets/slop-sheriff-social.jpg", imageAsset("image/jpeg", bundledAssets["slop-sheriff-social.jpg"])],
 ]);
 
 export const landingPaths = ["/", "/robots.txt", "/sitemap.xml", ...assets.keys()];
@@ -32,7 +38,8 @@ export function landingResponse(request: Request, environment = process.env.VERC
     body = landingPage(indexable, process.env.VERCEL_GIT_COMMIT_SHA);
   } else if (pathname === "/robots.txt") {
     headers.set("content-type", "text/plain; charset=utf-8");
-    body = indexable ? `User-agent: *\nAllow: /$\nAllow: /assets/\nDisallow: /eve/\nSitemap: ${siteOrigin}/sitemap.xml\n` : "User-agent: *\nDisallow: /\n";
+    // Crawlers must fetch public aliases to observe their noindex directives.
+    body = `User-agent: *\nAllow: /$\nAllow: /assets/\nDisallow: /eve/\n${indexable ? `Sitemap: ${siteOrigin}/sitemap.xml\n` : ""}`;
   } else if (pathname === "/sitemap.xml") {
     headers.set("content-type", "application/xml; charset=utf-8");
     body = `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${indexable ? `<url><loc>${siteOrigin}/</loc></url>` : ""}</urlset>`;
@@ -40,6 +47,12 @@ export function landingResponse(request: Request, environment = process.env.VERC
     const asset = assets.get(pathname);
     if (!asset) return new Response(null, { status: 404, headers });
     headers.set("content-type", asset.type);
+    headers.set("cache-control", "public, max-age=3600, must-revalidate");
+    headers.set("etag", asset.etag);
+    const validators = request.headers.get("if-none-match")?.split(",") ?? [];
+    if (validators.some((value) => value.trim() === "*" || value.trim().replace(/^W\//, "") === asset.etag)) {
+      return new Response(null, { status: 304, headers });
+    }
     body = Uint8Array.from(asset.bytes);
   }
   return new Response(request.method === "HEAD" ? null : body, { headers });

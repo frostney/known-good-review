@@ -50,7 +50,9 @@ describe("public landing routes", () => {
         expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow");
       }
       expect(await landingResponse(request("/"), environment).text()).toContain('name="robots" content="noindex, nofollow"');
-      expect(await landingResponse(request("/robots.txt"), environment).text()).toBe("User-agent: *\nDisallow: /\n");
+      const robots = await landingResponse(request("/robots.txt"), environment).text();
+      expect(robots).toContain("Allow: /$\nAllow: /assets/\nDisallow: /eve/\n");
+      expect(robots).not.toContain("Sitemap:");
       expect(await landingResponse(request("/sitemap.xml"), environment).text()).not.toContain("<loc>");
     }
   });
@@ -64,6 +66,10 @@ describe("public landing routes", () => {
       const html = await response.text();
       expect(html).toContain('name="robots" content="noindex, nofollow"');
       expect(html).toContain(`<link rel="canonical" href="${canonicalOrigin}/">`);
+      const robots = await landingResponse(new Request(`https://${hostname}/robots.txt`), "production").text();
+      expect(robots).toContain("Allow: /$\nAllow: /assets/\nDisallow: /eve/\n");
+      expect(robots).not.toContain("Sitemap:");
+      expect(await landingResponse(new Request(`https://${hostname}/sitemap.xml`), "production").text()).not.toContain("<loc>");
     }
   });
 
@@ -97,6 +103,30 @@ describe("public landing routes", () => {
       expect(response.headers.get("content-type")).toBe(contentType);
       // Fail the offline gate when an image changes without regenerating its bundle.
       expect(Buffer.from(await response.arrayBuffer()).equals(source)).toBe(true);
+    }
+  });
+
+  test("unversioned images expire within an hour and revalidate for GET and HEAD", async () => {
+    const path = "/assets/slop-sheriff-hero.webp";
+    const response = landingResponse(request(path), "production");
+    expect(response.headers.get("cache-control")).toBe("public, max-age=3600, must-revalidate");
+    const etag = response.headers.get("etag");
+    if (!etag) throw new Error("Expected an image ETag");
+    expect(etag).toMatch(/^"[a-f0-9]{64}"$/);
+    expect(landingResponse(request(path), "production").headers.get("etag")).toBe(etag);
+    expect(landingResponse(request("/assets/slop-sheriff-icon.png"), "production").headers.get("etag")).not.toBe(etag);
+    for (const method of ["GET", "HEAD"]) {
+      for (const validator of [etag, `W/${etag}`, `"old-image", W/${etag}`, "*"]) {
+        const cached = landingResponse(new Request(`${canonicalOrigin}${path}`, { method, headers: { "if-none-match": validator } }), "production");
+        expect(cached.status).toBe(304);
+        expect(cached.headers.get("etag")).toBe(etag);
+        expect(cached.headers.get("cache-control")).toBe(response.headers.get("cache-control"));
+        expect(await cached.text()).toBe("");
+      }
+      const stale = landingResponse(new Request(`${canonicalOrigin}${path}`, { method, headers: { "if-none-match": '"old-image"' } }), "production");
+      expect(stale.status).toBe(200);
+      expect(stale.headers.get("etag")).toBe(etag);
+      expect((await stale.arrayBuffer()).byteLength > 0).toBe(method === "GET");
     }
   });
 });

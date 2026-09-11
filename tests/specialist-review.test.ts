@@ -3,7 +3,7 @@ import { asSchema } from "ai";
 import { reviewInstructions } from "../src/review/policy";
 import { reviewLaneCheckpointInputSchema } from "../agent/tools/review_lane_checkpoint";
 import { activeReviewAxes } from "../src/review/axes";
-import { readNextReviewEvidencePacket, writeIncludedReviewEvidence, type ReviewEvidenceManifest } from "../src/review/evidence-bundle";
+import { readNextReviewEvidencePacket, reviewEvidenceManifestSchema, reviewEvidencePatchFile, reviewEvidencePacketCharacters, writeIncludedReviewEvidence, type ReviewEvidenceManifest } from "../src/review/evidence-bundle";
 import { validateLaneCheckpointCoverage, writeLaneCheckpoint, type LaneCompletedReport } from "../src/review/lane-checkpoint";
 import { retainSpecialistEvidence } from "../src/review/specialist-report";
 import { assembleCanonicalReviewReport, beginReportAssembly, type ReviewReportDraft } from "../src/review/report-assembly";
@@ -25,6 +25,49 @@ const check = {
 };
 
 describe("specialist evidence obligations", () => {
+  test.each(["omitted", "excluded"] as const)("%s metadata packets stay bounded and continue without losing obligations", async (kind) => {
+    const sandbox = sandboxFixture();
+    const source = await writeIncludedReviewEvidence(sandbox, { patchFingerprint: identity.patchFingerprint, path: "src/template.ts", patch: "+source\n", patchTokens: 2, status: "modified" });
+    const manifest = reviewEvidenceManifestSchema.parse({ schemaVersion: 1, ...identity, entries: Array.from({ length: 2000 }, (_, index) => {
+      const path = `src/${"nested/".repeat(40)}file-${index}.ts`;
+      return kind === "omitted"
+        ? { ...source, path, patchFile: reviewEvidencePatchFile(identity.patchFingerprint, path).fileName }
+        : { ...source, kind: "excluded", path, classification: ["generated"], addedLines: 1, deletedLines: 0 };
+    }) });
+    const axis = kind === "omitted" ? "test-against-spec" : "engineering-quality";
+    const delivered: number[] = [];
+    for (let revision = 0; revision < 20; revision += 1) {
+      const packet = await readNextReviewEvidencePacket(sandbox, manifest, axis, `bounded-${revision}`, revision);
+      expect(JSON.stringify(packet).length).toBeLessThanOrEqual(reviewEvidencePacketCharacters);
+      expect(packet.entries.length).toBeGreaterThan(0);
+      expect(await readNextReviewEvidencePacket(sandbox, manifest, axis, `replacement-${revision}`, revision)).toEqual(packet);
+      delivered.push(...packet.entries.map((entry) => entry.index));
+      if (packet.nextCursor === null) {
+        expect(packet.completedEntries).toEqual(Array.from({ length: 2000 }, (_, index) => index));
+        break;
+      }
+    }
+    expect(delivered).toEqual(Array.from({ length: 2000 }, (_, index) => index));
+  });
+
+  test("escaped patch text is charged after serialization and reconstructs across packets", async () => {
+    const sandbox = sandboxFixture();
+    const patch = '+"\\\n🙂'.repeat(110_000);
+    const entry = await writeIncludedReviewEvidence(sandbox, { patchFingerprint: identity.patchFingerprint, path: "src/escaped.ts", patch, patchTokens: 110_000, status: "modified" });
+    const manifest: ReviewEvidenceManifest = { schemaVersion: 1, ...identity, entries: [entry] };
+    let delivered = "";
+    for (let revision = 0; revision < 20; revision += 1) {
+      const packet = await readNextReviewEvidencePacket(sandbox, manifest, "engineering-quality", `escaped-${revision}`, revision);
+      expect(JSON.stringify(packet).length).toBeLessThanOrEqual(reviewEvidencePacketCharacters);
+      const fragment = packet.entries[0]?.content ?? "";
+      expect(fragment.length).toBeGreaterThan(0);
+      expect(new TextDecoder().decode(new TextEncoder().encode(fragment))).toBe(fragment);
+      delivered += fragment;
+      if (packet.nextCursor === null) break;
+    }
+    expect(delivered).toBe(patch);
+  });
+
   test("activation retains core review and excludes writing only for known non-prose inputs", () => {
     expect(activeReviewAxes(["src/main.ts"], [])).toEqual(["deduplication", "claim-and-specification", "engineering-quality", "test-against-spec", "writing-quality", "test-health"]);
     expect(activeReviewAxes(["bun.lock", "assets/logo.png"], [])).toEqual(["deduplication", "claim-and-specification", "engineering-quality", "test-against-spec", "test-health"]);

@@ -6,7 +6,8 @@ Own the runtime review policy, rename the repository and public branding,
 provide configurable cowboy voice and clean artwork, retain the core lanes,
 add spec-testing, writing-quality and test-health specialists, and show each
 finding's consequence in at most 300 characters with expandable full analysis.
-No production deployment or paid review is included.
+The initial scope excluded production deployment and paid review. Later
+authorized extensions and their validation results are recorded below.
 
 The comparison baseline is `b1e10994224000a79cae97cbc281193fd58dab13`.
 The selected approach preserves Eve's authored workflow, native child sessions,
@@ -205,3 +206,32 @@ and 35 native Eve gates. The PR61 replay still preserves all four transitions.
 The live retry and completed delivery must be verified separately after deploying
 the exact repaired commit. Local evidence is in `/tmp/slop-sheriff-budget-red.log`,
 `/tmp/slop-sheriff-budget-check.log` and `/tmp/slop-sheriff-budget-replay.log`.
+
+## Completed self-review and finding repairs
+
+The deployed `d48ea81` review completed all seven lanes and publication on
+11 September 2026. Run `wrun_41M26WMZJ20GS9F5QZ5X018GG9` delivered all six
+findings inline: two Important and four Improvements, with no Blocking finding.
+The aggregate check reported `REVIEW COMPLETE` with an advisory neutral result.
+The successful continuation confirms the repaired root quota boundary for this
+run; it does not establish quality parity or token savings.
+
+All six findings were verified against the candidate. Follow-up repairs bound
+serialized evidence packets, including omitted and excluded metadata, JSON
+escaping, obligations and continuation bookkeeping. Regressions reproduce both
+metadata and escaped-text overflow, then prove complete ordered coverage,
+idempotent recovery and lossless Unicode patch reconstruction across packets.
+The public aliases allow crawling so their noindex directive can be observed.
+Unversioned images use a one-hour cache lifetime and content-hash ETags. The
+compiled Eve smoke now imports the production home channel and exercises public
+GET and HEAD routes, including the literal-brace route failure case. Ambiguous
+trusted-base and initial-scope wording was also clarified.
+
+The hosted review reported sandbox capability limitations, including missing
+Bun/dependencies and runtime/browser evidence. Those limitations remain explicit;
+local and CI checks provide separate validation, not proof that its behavioral
+specialist checks executed successfully in the review sandbox.
+
+The repair candidate passes `bun run check`: TypeScript, 269 tests, 92 native
+Eve gates, discovery without diagnostics and production build. The recorded
+PR 61 replay preserves all four canonical transitions.

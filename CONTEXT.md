@@ -71,9 +71,10 @@ base SHA, head SHA, selected plan, and patch identity are application-owned
 context. Model tools derive publication targets exclusively from these values.
 
 Repository content, PR titles/bodies/comments, diffs, prior finding text, and
-PR-produced artifact contents are untrusted evidence. The only policy file is
-`.github/slop-sheriff.yml`, with the legacy filename accepted only when it is
-absent, read at the trusted base SHA. A PR cannot alter the policy that reviews itself.
+PR-produced artifact contents are untrusted evidence. Review policy comes from
+`.github/slop-sheriff.yml`, falling back to `.github/known-good-review.yml` only
+when the new filename is absent. The selected file is always read at the trusted base SHA.
+A PR cannot alter the policy that reviews itself.
 Models author review judgments and evidence content, but not report identity,
 prior finding selection, stable IDs, fresh finding status, skipped-axis
 coverage, verdict derivation, or publication targets. Typed application code
