@@ -8,6 +8,7 @@ import type { SessionAuthContext } from "eve/context";
 import {
   decodeReviewState,
   encodeReviewState,
+  isReviewStateComment,
   pendingReviewState,
 } from "../src/github/review-state";
 import {
@@ -27,6 +28,33 @@ import {
   beginReviewRecovery,
   buildReviewFailureEnvelope,
 } from "../src/review/recovery";
+
+test("new and legacy commands require the exact bot name", () => {
+  for (const name of ["slop-sheriff", "known-good-review"]) {
+    expect(requestsManualFullReview(`@${name} run full review`)).toBeTrue();
+    expect(requestsManualFullReview(`/${name} full review`)).toBeTrue();
+    expect(addressesKnownGoodReview(`@${name} continue`)).toBeTrue();
+    expect(reviewControlResponse(`@${name} continue`)).toBe("approve");
+    expect(addressesKnownGoodReview(`@${name}-other continue`)).toBeFalse();
+    expect(requestsManualFullReview(`@${name}-other full review`)).toBeFalse();
+  }
+});
+
+test("branding preserves legacy state decoding and publication voice", () => {
+  const state = pendingReviewState({
+    pullRequest: 7,
+    status: "running",
+    publication: { blocking: false, profile: "balanced", personality: false },
+  });
+  const plain = encodeReviewState(state);
+  expect(plain).toContain("Slop Sheriff: in progress");
+  expect(plain).not.toContain("on patrol");
+  expect(decodeReviewState(plain)).toEqual(state);
+  expect(decodeReviewState(plain.replace("Slop Sheriff:", "known-good-review:"))).toEqual(state);
+  expect(isReviewStateComment(`### A finding\n\n${plain}`)).toBeFalse();
+  const cowboy = encodeReviewState({ ...state, publication: { blocking: false, profile: "balanced", personality: true } });
+  expect(cowboy).toContain("on patrol");
+});
 
 function reviewAuth(
   kind: "delta" | "full",
@@ -88,7 +116,7 @@ describe("GitHub-owned state and telemetry", () => {
       updatedAt: "2026-08-16T12:00:00.000Z",
     };
     const encoded = encodeReviewState(state);
-    expect(encoded).toContain("## ✅ known-good-review: approved");
+    expect(encoded).toContain("## ✅ Slop Sheriff: approved");
     expect(encoded).toContain("No findings were reported.");
     expect(decodeReviewState(encoded)).toEqual(state);
     expect(decodeReviewState("ordinary comment")).toBeNull();
@@ -126,8 +154,8 @@ describe("GitHub-owned state and telemetry", () => {
     const body = encodeReviewState(
       pendingReviewState({ pullRequest: 42, status: "running" }),
     );
-    expect(body).toContain("## ⏳ known-good-review: in progress");
-    expect(body).toContain("The review is currently running.");
+    expect(body).toContain("## ⏳ Slop Sheriff: in progress");
+    expect(body).toContain("The sheriff is on patrol. Review in progress.");
     expect(decodeReviewState(body)?.initialFullStatus).toBe("running");
   });
 

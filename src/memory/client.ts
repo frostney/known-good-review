@@ -1,3 +1,4 @@
+import type { ReviewAxis } from "../review/axes";
 import { createHash } from "node:crypto";
 import type { ReviewConfig } from "../config/review-config";
 import type { TrustedGitHubContext } from "../github/trusted-context";
@@ -175,7 +176,7 @@ export async function enqueueReviewMemory(
 export async function retrieveReviewMemory(input: {
   readonly config: ReviewConfig;
   readonly repositoryId: string;
-  readonly axis: "deduplication" | "claim-and-specification" | "engineering-quality" | "discoverability";
+  readonly axis: ReviewAxis;
   readonly query: string;
   readonly limit?: number;
 }): Promise<MemoryAvailability> {

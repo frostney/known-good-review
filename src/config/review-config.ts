@@ -33,6 +33,7 @@ export interface ReviewConfig {
   readonly publicRoots: readonly string[];
   readonly profile: ReviewProfile;
   readonly blocking: boolean;
+  readonly personality: boolean;
   readonly agents:
     | { readonly kind: "inherit" }
     | { readonly kind: "all"; readonly models: ModelChain }
@@ -50,6 +51,7 @@ const rawConfigSchema = z
     publicRoots: z.array(z.string().min(1)).optional(),
     profile: z.enum(reviewProfiles).optional(),
     blocking: z.boolean().optional(),
+    personality: z.boolean().optional(),
     agents: z
       .union([
         z.string(),
@@ -121,6 +123,7 @@ export function parseReviewConfig(source: string | null | undefined): ReviewConf
       publicRoots: [],
       profile: defaultProfile,
       blocking: false,
+      personality: true,
       agents: { kind: "inherit" },
     };
   }
@@ -130,14 +133,14 @@ export function parseReviewConfig(source: string | null | undefined): ReviewConf
     document = parse(source);
   } catch (error) {
     throw new Error(
-      `Invalid .github/known-good-review.yml: ${error instanceof Error ? error.message : String(error)}`,
+      `Invalid review configuration: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 
   const result = rawConfigSchema.safeParse(document ?? {});
   if (!result.success) {
     throw new Error(
-      `Invalid .github/known-good-review.yml: ${z.prettifyError(result.error)}`,
+      `Invalid review configuration: ${z.prettifyError(result.error)}`,
     );
   }
 
@@ -157,6 +160,7 @@ export function parseReviewConfig(source: string | null | undefined): ReviewConf
   const publicRoots = parsePublicRoots(result.data.publicRoots);
   const profile = result.data.profile ?? defaultProfile;
   const blocking = result.data.blocking ?? false;
+  const personality = result.data.personality ?? true;
   if (agents === undefined) {
     return {
       model,
@@ -164,6 +168,7 @@ export function parseReviewConfig(source: string | null | undefined): ReviewConf
       publicRoots,
       profile,
       blocking,
+      personality,
       agents: { kind: "inherit" },
     };
   }
@@ -174,6 +179,7 @@ export function parseReviewConfig(source: string | null | undefined): ReviewConf
       publicRoots,
       profile,
       blocking,
+      personality,
       agents: { kind: "all", models: parseModelChain(agents, "agents") },
     };
   }
@@ -195,6 +201,7 @@ export function parseReviewConfig(source: string | null | undefined): ReviewConf
     publicRoots,
     profile,
     blocking,
+    personality,
     agents: { kind: "axes", models },
   };
 }

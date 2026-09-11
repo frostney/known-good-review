@@ -1,133 +1,101 @@
-# Audit rollout and live validation
+# Deployment and live validation
 
-Use the existing Vercel project and Convex production deployment. Verify both
-identities through authenticated provider access before changing configuration.
-The local validation build skips sandbox prewarming; it does not certify a
-deployable hosted sandbox. Verify that the Vercel build runs `bun x eve build`
-without `--skip-sandbox-prewarm`, with permission to create sandbox templates.
-The installed Eve deployment guide is the command reference for this release.
+For a new installation, follow [self-hosting setup](install.md). For an existing
+installation, preserve the Vercel project, Connect connector, GitHub App and
+installation identities, Convex deployment, evidence key, and shared memory token.
+Verify their IDs through authenticated provider access before changing settings.
 
 ## Release gate
 
-The release commit must pass `bun run check` and `bun run replay:pr61`, including
-the generated tool-schema contracts, on both supported Bun versions in CI.
-Record the commit, deployment IDs, configured model IDs, trusted base revision,
-and provider versions with each live result. Never include secret values.
+The exact release commit must pass `bun run check` and `bun run replay:pr61`.
+CI uses the Bun version pinned in `package.json`. Generated tool-schema and
+report-assembly checks must pass before any live review. Offline replay preserves
+four recorded finding transitions; it does not prove current model quality.
 
-Configure `KNOWN_GOOD_REVIEW_EVIDENCE_KEY` only in the app environment: 32 random
-bytes encoded as 64 hexadecimal characters, stable across replicas and restarts.
-Preserve an existing valid key. Never inject it into repository sandboxes or
-Convex. Keep the shared memory bearer token aligned between the app and Convex.
+The local build skips sandbox prewarming. Production must run `bunx eve build`
+without `--skip-sandbox-prewarm`, with permission to create sandbox templates.
+The current combined build is `bunx convex deploy --cmd 'bunx eve build'`.
+Use a separate Convex deployment for ordinary previews.
 
-## App-first migration
+The Slop Sheriff release adds allowed review-axis values to the existing Convex
+schema. It does not repeat the earlier staged-memory migration. The app-first
+migration and drain procedure from PR36 is historical; consult that revision
+only when changing those incompatible contracts again.
 
-Deploy the app before replacing the backend. New callers already tolerate the
-old backend's missing admission endpoint: they receive no receipt and skip
-advisory memory ingestion. New deletion bodies are accepted by the old Zod
-contract, which strips added fields and retains existing cleanup. Search remains
-compatible. `tests/memory-client.test.ts` covers this transition against the
-exact old deletion schemas from `59bf616`.
+## Rename an existing installation
 
-1. Run `bun run migration:check` with a production credential that has
-   `deployment:data:view`. A separate, expiring read-only key can run this gate
-   locally without widening the existing Vercel deployment key. Supply it only
-   to the check process through `CONVEX_DEPLOY_KEY`, verify its deployment target,
-   and never print or upload it. Record the aggregate result and revoke the key
-   after validation. An authorized browser login alone does not authenticate
-   the CLI or build environment.
-2. Build the exact CI-green app revision in the existing production environment
-   with `bunx eve build`, immediately after the check passes. Override the combined build
-   command for this deployment only; do not deploy Convex yet. Use Vercel's
-   `--prod --skip-domain` to defer domain promotion. This does not isolate the
-   candidate from production Workflow routing; see the routing limitation below.
-3. Verify the app and sandbox, then promote it to the existing production alias
-   used for direct application access. Connect targets the project and its
-   `/eve/v1/github` route. No incoming events need to be paused. During this phase,
-   reviews publish normally and skip new memory ingestion.
-4. Inspect Workflow runs and steps. Retire parked sessions from older app
-   deployments through supported session controls; let real active turns and
-   HTTP invocations finish. New full/delta dispatches already reset sessions.
-   Never restart old unsigned evidence as a new review.
-5. Run `bun run migration:check` again immediately before the backend switch,
-   using the same separate read access or a suitably scoped build credential.
-   It reads tables through the native Convex CLI without logging their contents
-   and rejects queued/running scheduled work, pending ingestion, migration and
-   deletion. If inspection exceeds its bound, drain through paginated inspection
-   first. A browser snapshot is useful corroboration, but does not replace this gate.
-6. After old callers and actions are drained, deploy the backend with the new
-   app using `bunx convex deploy --cmd 'bunx eve build'`.
-   Preserve the existing evidence key and the shared memory token.
-7. Verify fresh admission, revocation, hosted sandbox and publication. Start a
-   fresh full/delta evaluation. Reviews begun during the transition retain null
-   admission and skip ingestion even if they finish after backend promotion.
+Rename the existing Vercel project and GitHub App registration. Do not replace
+them or rotate credentials just to change the brand. Pin `GITHUB_BOT_USER_ID`
+to the existing App's immutable bot ID before changing its registered name.
+Keep opaque connector UIDs and `KNOWN_GOOD_REVIEW_*` environment variables.
 
-This order matters: old callers are incompatible with the new backend, and old
-executing Convex actions can call internal functions whose contracts changed.
-Do not infer drained work from an idle workflow count alone. Sleeping session
-and timeout workflows remain pinned to their original deployment until retired.
-Confirm each reset's exact previous session ID, then inspect Workflow to prove
-the old run is terminal and its associated timeout helper is stopped. A reset
-response alone is insufficient for sessions pinned to an older Eve version.
+Verify the new domain, old aliases, App ID, bot identity, installation access,
+and Connect project/path after the change. Do not assume old App URLs redirect.
+Update the App homepage, repository homepage, icon and social preview. Required
+Checks using the old name need a deliberate owner update; the bot never edits
+branch protection. Reviews remain advisory unless trusted-base config says otherwise.
+
+## Candidate rollout and routing
+
+Build the exact CI-green candidate with production settings and a full hosted
+sandbox prewarm. A production candidate may be staged with Vercel's
+`--prod --skip-domain`; verify it before promoting its production aliases.
+Keep the runtime and Convex schema compatible throughout this operation.
+
+Installed Eve 0.52.5 pins new Workflow starts to `VERCEL_DEPLOYMENT_ID`, and
+accepted starts retain the accepting deployment. Existing runs remain pinned
+to their original deployment. Record actual Workflow deployment IDs rather
+than inferring them from the domain. Connect forwards to the project at
+`/eve/v1/github`; verify which production candidate is serving that route.
+
+Inspect active sessions before promotion. Old sleeping timeout helpers alone
+do not prove that a review is running. Do not cancel unrelated work, detach
+Connect, or return maintenance errors as an event-preserving pause: forwarding
+has bounded retries, not a documented lossless queue.
 
 ### Protected candidate access
 
-A production candidate can reject the local Vercel SDK's development OIDC token
-with `TRUSTED_SOURCES_ENVIRONMENT_MISMATCH`. This happens before the app receives
-the request. Do not relax deployment protection to make a health check pass.
-Use an existing authorized automation bypass, a signed-in browser, or a production
-workload's OIDC token. Vercel builds receive their own `VERCEL_OIDC_TOKEN`; an
-unpromoted production build can validate an existing immutable candidate with
-the public OIDC SDK and Eve client. Check the token's project, team and environment
-without logging it, and require both ready health and valid production agent info.
+A protected production candidate can reject a local development OIDC token
+before the app receives it. Use an existing authorized automation bypass,
+signed-in browser, or production workload OIDC token. Do not disable deployment
+protection for a probe. Require ready health and valid production agent info;
+keep probe credentials out of logs, artifacts, and repository sandboxes.
 
-After promotion, a publicly accessible production alias can use the same local
-OIDC token as bearer authentication for Eve without adding the trusted-source
-header. Verify the alias's deployment ID before session controls. Keep operational
-probe code in build-time inputs and keep credentials out of logs and sandboxes.
+After promotion, verify the public alias's deployment ID and landing metadata,
+the authenticated Eve surface, and Connect routing. Public landing assets must
+not expose sessions or create model work. Preview and local pages remain
+`noindex`; only the canonical production hostname is indexable.
 
-### Workflow routing limitation
+## One advisory self-review pilot
 
-Installed Eve 0.45 starts new production sessions with Workflow's
-`deploymentId: "latest"`; no public Eve option pins those starts to the serving
-deployment. The provider resolves that value to the latest successful production
-deployment, including a candidate created with `--skip-domain`. Promotion of a
-different domain does not change that resolver result. Existing runs retain
-their original deployment.
+The approved launch pilot extends PR42 and deploys its validated candidate
+before merging. There is no merge authorization. After exact-head CI and
+production validation pass, make PR42 ready once. That transition is the single
+paid trigger; do not also post a manual full-review command.
 
-Treat every successful production candidate as eligible to receive new workflows.
-All app-first candidates must tolerate the old backend before they become ready.
-Operational probe builds must contain the same validated runtime revision, and
-their probes belong only in build-time inputs. Record the actual run deployment
-ID, rather than inferring it from the domain. Hold deployments fixed during a
-full/delta comparison. Full candidate isolation requires separate infrastructure
-or an upstream Eve capability; domain staging alone cannot provide it.
+Freeze the head and deployments while the review runs. Confirm the repository
+is included in the existing App installation and trusted-base policy remains
+advisory. Observe completion, exact-head publication, all required lane coverage,
+canonical finding identities, duplicate and false-positive control, impact
+summaries, and expandable detail. Failure or missing coverage is not completion.
+Return PR42 to draft after the terminal result before pushing any follow-up fix.
+Assess the result before enabling ongoing automatic self-review.
 
-Connect does not provide a documented lossless maintenance pause. Failed
-forwarding gets bounded retries, so detaching Connect or returning `503` is not
-an event-preserving rollout mechanism.
+Record start/end times, head and base SHAs, deployment IDs, provider versions,
+requested/resolved models, phase latency, input/output/cache tokens, Gateway
+cost, and unresolved accounting. Deduplicate model-call identities and preserve
+cache-inclusive SDK totals separately from Gateway-native usage. Keep secrets,
+raw credentials, and private prompt contents out of the evidence record.
 
-## Recovery limits
+One pilot measures that run. It does not establish performance or quality parity,
+or justify another paid run without authorization. A deterministic mismatch
+must be reproduced and fixed offline before another live attempt.
 
-Before the backend switch, the old app and backend remain an app-only rollback
-option. After that switch, an app-only rollback would restore incompatible callers.
-The old Convex schema may reject newly written fields and tables. An immediate
-two-sided rollback has not been validated. Stop the staged rollout after a failed gate and repair forward or rehearse a
-compatible recovery on a disposable
-deployment before restoring service. Do not erase revocation records to make an
-old schema deploy: that could allow delayed requests to recreate deleted data.
+## Recovery
 
-## Controlled live evaluation
-
-Use an agreed installed test repository and PR with a preserved expected-finding
-set. Run one explicit `@known-good-review run full review`, then one controlled
-semantic delta that fixes one expected finding and leaves another unchanged.
-Verify canonical identities, finding transitions, duplicate and false-positive
-control, exact-head Checks, summary and inline publication, memory admission,
-and stable recovery. Keep baseline and candidate on the same input/configuration
-when comparing their performance.
-
-Record phase latency, requested and resolved models, prompt/output/cache tokens,
-Gateway cost and unresolved telemetry for each run. Report quality results
-alongside those measurements; one full/delta pair cannot establish a reliable
-speed improvement. The PR 61 offline replay preserves recorded transitions but
-does not measure current model quality or hosted latency.
+Do not roll back the app to a schema-incompatible version. For this additive-axis
+release, examine any reports already written with new axes before reverting
+readers or validators. Preserve signed evidence, revocation records, and review
+state. A failed deployment should leave the prior production candidate serving;
+verify provider state rather than assuming rollback succeeded. Repair forward
+when compatibility cannot be established.

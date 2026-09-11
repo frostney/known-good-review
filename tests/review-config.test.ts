@@ -7,6 +7,7 @@ import {
   modelsForSpecialist,
   parseReviewConfig,
 } from "../src/config/review-config";
+import { readReviewConfigSource } from "../src/config/review-config-source";
 
 describe("trusted review configuration", () => {
   test("defaults every invocation to the configured Gateway fallback chain", () => {
@@ -15,6 +16,7 @@ describe("trusted review configuration", () => {
     expect(config.embedding).toEqual(defaultEmbedding);
     expect(config.profile).toBe("balanced");
     expect(config.blocking).toBeFalse();
+    expect(config.personality).toBeTrue();
     expect(modelsForAxis(config, "deduplication")).toEqual(defaultModels);
     expect(modelsForSpecialist(config, "scout")).toEqual(
       defaultSpecialistModels,
@@ -90,4 +92,29 @@ embeddingDimension: 3072
       parseReviewConfig("agents:\n  correctness: openai/gpt-5.6-sol"),
     ).toThrow("Invalid");
   });
+});
+
+test("personality is a boolean presentation setting across agent configurations", () => {
+  for (const agents of ["", "agents: openai/gpt-5.6-sol", "agents:\n  engineering-quality: openai/gpt-5.6-sol"]) {
+    expect(parseReviewConfig(`personality: false\n${agents}`).personality).toBeFalse();
+  }
+  expect(() => parseReviewConfig('personality: "false"')).toThrow("Invalid");
+});
+
+test("new trusted config wins, including an empty file, and only absence permits fallback", async () => {
+  const paths: string[] = [];
+  expect(await readReviewConfigSource(async (path) => {
+    paths.push(path);
+    return "";
+  })).toBe("");
+  expect(paths).toEqual([".github/slop-sheriff.yml"]);
+  paths.length = 0;
+  expect(await readReviewConfigSource(async (path) => {
+    paths.push(path);
+    return path.endsWith("slop-sheriff.yml") ? null : "personality: false";
+  })).toBe("personality: false");
+  expect(paths).toEqual([".github/slop-sheriff.yml", ".github/known-good-review.yml"]);
+  await expect(readReviewConfigSource(async () => { throw new Error("Forbidden"); })).rejects.toThrow("Forbidden");
+  const invalid = await readReviewConfigSource(async () => "unknown: true");
+  expect(() => parseReviewConfig(invalid)).toThrow("Invalid");
 });

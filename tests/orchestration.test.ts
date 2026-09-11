@@ -8,15 +8,16 @@ import { laneCheckpointPath, readLaneCheckpoint, writeLaneCheckpoint } from "../
 import { laneReceiptSchema, orchestrateReview, reviewWorkflowInputSchema, scoutReceiptSchema, type ReviewChildDispatch, type ReviewOrchestrationPlan } from "../src/review/orchestration";
 import { parseSubagentRoute } from "../src/models/routing";
 import { activeAxes, checkpointContent, identity } from "./fixtures/eve-runtime-smoke/agent/lib/orchestration";
+import { reviewAxes, type ReviewAxis } from "../src/review/axes";
 
 const secret = "1".repeat(64);
-function setup(options: { incomplete?: boolean; alwaysIncomplete?: boolean; fail?: boolean } = {}) {
+function setup(options: { incomplete?: boolean; alwaysIncomplete?: boolean; fail?: boolean; axes?: readonly ReviewAxis[] } = {}) {
   const files = new Map<string, string>();
   const sandbox = authenticatedEvidenceSandbox({
     async readTextFile({ path }: { path: string }) { return files.get(path) ?? null; },
     async writeTextFile({ path, content }: { path: string; content: string }) { files.set(path, content); },
   }, "root", secret);
-  const plan: ReviewOrchestrationPlan = { ...identity, activeAxes, rootSessionId: "root", commonPrefix: "Immutable trusted prefix" };
+  const plan: ReviewOrchestrationPlan = { ...identity, activeAxes: options.axes ?? activeAxes, rootSessionId: "root", commonPrefix: "Immutable trusted prefix" };
   const calls: ReviewChildDispatch[] = [];
   const call = async (dispatch: ReviewChildDispatch): Promise<unknown> => {
     calls.push(dispatch);
@@ -39,6 +40,16 @@ function setup(options: { incomplete?: boolean; alwaysIncomplete?: boolean; fail
 }
 
 describe("authored review protocol", () => {
+  test("all seven axes retain signed checkpoint validation and the unchanged dispatch ceiling", async () => {
+    const complete = setup({ axes: reviewAxes });
+    const run = complete.run();
+    expect(complete.calls).toHaveLength(7);
+    expect(await run).toEqual({ complete: true, activeAxes: reviewAxes });
+    const exhausted = setup({ axes: reviewAxes, alwaysIncomplete: true });
+    await expect(exhausted.run()).rejects.toThrow("Review dispatch budget exhausted");
+    expect(exhausted.calls).toHaveLength(16);
+    expect(await readLaneCheckpoint(exhausted.sandbox, identity, "engineering-quality")).toMatchObject({ status: "in-progress" });
+  });
   test("model-authored context cannot override trusted identity, axes or the initial routing envelope", async () => {
     const fixture = setup();
     const auth = withTrustedReviewContext({ authenticator: "github", principalId: "review", principalType: "app", attributes: { repository: "owner/repo", installation_id: "1", pull_request_number: "1" } }, {

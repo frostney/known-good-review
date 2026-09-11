@@ -11,6 +11,7 @@ import {
 import { z } from "zod";
 import { fetchBoundedGitHubPages } from "../../src/github/pagination";
 import { accessibleRepositoryIds } from "../../src/github/installation-access";
+import { readReviewConfigSource } from "../../src/config/review-config-source";
 import { parseReviewConfig } from "../../src/config/review-config";
 import { validateConfiguredModels } from "../../src/models/catalog";
 import { githubAdapter, githubConnector } from "../../src/github/chat-adapter";
@@ -28,7 +29,7 @@ import {
   reviewControlResponse,
 } from "../../src/github/manual-full";
 import {
-  checkName,
+  reviewCheckNames,
   parseActiveReviewExternalId,
   pendingPublicationRetry,
   publishFailClosedCheck,
@@ -41,8 +42,7 @@ import { withTrustedReviewContext } from "../../src/github/trusted-context";
 import { handleGitHubLifecycleWebhook } from "../../src/github/lifecycle";
 import { captureMemoryAdmission, requestMemoryDeletion } from "../../src/memory/client";
 import { findingsToRevalidate } from "../../src/review/revalidation";
-import type { ReviewAxis } from "../../src/review/axes";
-import { discoverabilityApplies } from "../../src/review/discoverability";
+import { activeReviewAxes, reviewAxes } from "../../src/review/axes";
 import { effectivePatchFingerprint } from "../../src/review/effective-patch";
 import { withFreshReviewSessions } from "../../src/github/session-routing";
 import { publishPendingReview } from "../lib/publish-review";
@@ -119,19 +119,19 @@ async function fetchTrustedConfig(
   ctx: GitHubInboundContext,
   baseSha: string,
 ): Promise<string> {
-  try {
-    const response = await ctx.github.request({
-      method: "GET",
-      path: `/repos/${ctx.repository.owner}/${ctx.repository.name}/contents/.github/known-good-review.yml?ref=${encodeURIComponent(baseSha)}`,
-    });
-    const file = contentSchema.parse(response.body);
-    return Buffer.from(file.content.replaceAll("\n", ""), "base64").toString(
-      "utf8",
-    );
-  } catch (error) {
-    if (error instanceof GitHubApiError && error.status === 404) return "";
-    throw error;
-  }
+  return readReviewConfigSource(async (path) => {
+    try {
+      const response = await ctx.github.request({
+        method: "GET",
+        path: `/repos/${ctx.repository.owner}/${ctx.repository.name}/contents/${path}?ref=${encodeURIComponent(baseSha)}`,
+      });
+      const file = contentSchema.parse(response.body);
+      return Buffer.from(file.content.replaceAll("\n", ""), "base64").toString("utf8");
+    } catch (error) {
+      if (error instanceof GitHubApiError && error.status === 404) return null;
+      throw error;
+    }
+  });
 }
 
 async function fetchReviewState(
@@ -169,13 +169,12 @@ async function fetchActiveReviewIdentity(
   baseSha: string,
   headSha: string,
 ) {
-  const response = await ctx.github.request({
+  const responses = await Promise.all(reviewCheckNames.map((name) => ctx.github.request({
     method: "GET",
-    path: `/repos/${ctx.repository.owner}/${ctx.repository.name}/commits/${headSha}/check-runs?check_name=${checkName}&filter=latest&per_page=100`,
-  });
-  const checks = checkRunsSchema
-    .parse(response.body)
-    .check_runs.filter((check) => check.name === checkName)
+    path: `/repos/${ctx.repository.owner}/${ctx.repository.name}/commits/${headSha}/check-runs?check_name=${name}&filter=latest&per_page=100`,
+  })));
+  const checks = responses.flatMap((response) => checkRunsSchema.parse(response.body).check_runs)
+    .filter((check) => reviewCheckNames.some((name) => name === check.name))
     .sort((left, right) => right.id - left.id);
   for (const check of checks) {
     const identity = parseActiveReviewExternalId(check.external_id, {
@@ -311,14 +310,7 @@ async function trustedReviewControlAuth(ctx: GitHubInboundContext) {
     )
     .map((file) => ({ path: file.path, status: file.status }));
   const reviewedPaths = reviewFiles.map((file) => file.path);
-  const configuredAxes: ReviewAxis[] = [
-    "deduplication",
-    "claim-and-specification",
-    "engineering-quality",
-  ];
-  if (discoverabilityApplies(reviewedPaths, config.publicRoots)) {
-    configuredAxes.push("discoverability");
-  }
+  const configuredAxes = activeReviewAxes(reviewedPaths, config.publicRoots);
   const pendingIdentity =
     state.kind === "valid"
       ? state.state.pendingPublication?.identity
@@ -514,17 +506,8 @@ async function dispatchReview(input: {
   const reviewedPaths = dispatch.plan.kind === "delta"
     ? dispatch.changedFiles
     : patchFiles.map((file) => file.path);
-  const activeAxes: ReviewAxis[] = [
-    "deduplication",
-    "claim-and-specification",
-    "engineering-quality",
-  ];
-  if (discoverabilityApplies(reviewedPaths, reviewConfig.publicRoots)) {
-    activeAxes.push("discoverability");
-  }
-  const skippedAxes = activeAxes.includes("discoverability")
-    ? []
-    : ["discoverability" as const];
+  const activeAxes = activeReviewAxes(reviewedPaths, reviewConfig.publicRoots);
+  const skippedAxes = reviewAxes.filter((axis) => !activeAxes.includes(axis));
 
   await publishInProgressCheck({
     activeAxes,
@@ -724,7 +707,7 @@ async function onComment(ctx: GitHubInboundContext, comment: GitHubComment) {
 
 const { credentials: githubCredentials, api: githubApi } = connectedGitHubChannel(githubConnector);
 const channel = githubChannel({
-  botName: "known-good-review",
+  botName: "slop-sheriff",
   credentials: githubCredentials,
   api: githubApi,
   turnPolicy: "steer",

@@ -27,6 +27,7 @@ export const reviewStateSchema = z.object({
     .object({
       blocking: z.boolean(),
       profile: z.enum(reviewProfiles),
+      personality: z.boolean().optional(),
     })
     .optional(),
   baseline: z
@@ -60,13 +61,13 @@ const attachmentLabel = "Review state attachment.";
 
 function visibleState(parsed: ReviewState): string {
   return parsed.failure
-    ? reviewProgressBody("failed")
+    ? reviewProgressBody("failed", parsed.publication?.personality)
     : parsed.initialFullStatus === "completed" && parsed.baseline
       ? reviewResultBody(
           parsed.baseline.report,
           parsed.publication ?? { blocking: false, profile: "balanced" },
         )
-      : reviewProgressBody(parsed.initialFullStatus);
+      : reviewProgressBody(parsed.initialFullStatus, parsed.publication?.personality);
 }
 
 function stateComment(state: ReviewState, payload: string): string {
@@ -161,12 +162,12 @@ export function decodeReviewState(comment: string, parts: readonly string[] = []
 export function isReviewStateComment(comment: string): boolean {
   // Finding bodies can quote markers. Only application-authored state envelopes
   // begin with this heading (or the legacy marker-only form).
-  return /^(?:## [^\n]*known-good-review:|<!-- known-good-review:state\n)/.test(comment)
+  return /^(?:## [^\n]*(?:Slop Sheriff|known-good-review):|<!-- known-good-review:state\n)/.test(comment)
     && comment.includes(`<!-- ${stateMarker}\n`);
 }
 
 export function pendingReviewState(input: {
-  readonly publication?: { readonly blocking: boolean; readonly profile: "focused" | "balanced" | "thorough" };
+  readonly publication?: { readonly blocking: boolean; readonly profile: "focused" | "balanced" | "thorough"; readonly personality?: boolean };
   readonly pullRequest: number;
   readonly status: "debouncing" | "running" | "failed";
 }): ReviewState {

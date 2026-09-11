@@ -1,4 +1,4 @@
-# known-good-review
+# Slop Sheriff
 
 This is a standalone Eve agent application. Use Bun for dependency management,
 scripts, tests, and local execution. Keep `CLAUDE.md` as only `@AGENTS.md`.
@@ -42,14 +42,15 @@ Report phase latency, tokens, cache use, and cost for comparison, but do not use
 diff-size heuristics or hard time, token, or cost acceptance caps.
 
 Project-local development skills live under `.agents/skills/` and are managed
-through `skills-lock.json`; never copy skill folders by hand. The runtime
-`code-review` skill lives under `agent/skills/code-review/` and must come from
-the recorded known-good-route revision through the Skills CLI.
+through `skills-lock.json`; never copy skill folders by hand. Runtime review
+policy is locally authored in `src/review/policy.ts` and
+`agent/skills/review-policy/`. Keep upstream attribution in the provenance
+document; development skill provenance does not govern runtime execution.
 
 The app is review-only. It must never push branches, merge pull requests,
 change repository settings, or expose GitHub, Gateway, or telemetry credentials
-to a repository sandbox. Read `.github/known-good-review.yml` only from the
-trusted base revision of the pull request.
+to a repository sandbox. Read `.github/slop-sheriff.yml` (or the legacy `.github/known-good-review.yml`
+when absent) only from the trusted base revision of the pull request.
 
 Before any production or live review after changing a model-facing tool schema,
 lane report schema, report mapper, or canonical finding contract, prove the

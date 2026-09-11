@@ -4,7 +4,9 @@ import { reviewAxes } from "./axes";
 import {
   findingChurnSchema,
   reviewFindingEvidenceSchema,
+  findingImpactSummarySchema,
 } from "./findings";
+import { isSpecialistAxis } from "./specialist-scope";
 
 const revisionSchema = z.string().regex(/^[a-f0-9]{40}$/);
 const fingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -20,6 +22,17 @@ const laneReportCandidateSchema = reviewFindingEvidenceSchema
     churn: findingChurnSchema.nullable(),
     uncertainty: z.array(boundedReportText).max(12),
   });
+
+export const specialistCheckSchema = z.strictObject({
+  entries: z.array(z.number().int().nonnegative()).min(1).max(2_000),
+  requirement: boundedReportText,
+  source: boundedReportText,
+  expected: boundedReportText,
+  environment: boundedReportText,
+  action: boundedReportText,
+  observed: boundedReportText,
+  status: z.enum(["passed", "failed", "unverified", "out-of-scope"]),
+});
 
 export const laneCompletedReportSchema = z
   .strictObject({
@@ -53,6 +66,7 @@ export const laneCompletedReportSchema = z
     candidates: z.array(laneReportCandidateSchema).max(100),
     verifiedClaims: z.array(boundedReportText).max(100),
     limitations: z.array(boundedReportText).max(100),
+    specialistChecks: z.array(specialistCheckSchema).max(2_000).nullable().optional(),
   })
   .refine(
     (report) =>
@@ -61,6 +75,11 @@ export const laneCompletedReportSchema = z
   );
 
 export type LaneCompletedReport = z.infer<typeof laneCompletedReportSchema>;
+
+const laneCompletedReportDraftSchema = laneCompletedReportSchema.safeExtend({
+  candidates: z.array(laneReportCandidateSchema.extend({ impactSummary: findingImpactSummarySchema })).max(100),
+  specialistChecks: z.array(specialistCheckSchema).max(2_000).nullable(),
+});
 
 export const laneCheckpointContentSchema = z
   .strictObject({
@@ -114,6 +133,10 @@ export const laneCheckpointSchema = laneCheckpointContentSchema.extend({
   patchFingerprint: fingerprintSchema,
   evidenceDigest: fingerprintSchema,
   revision: z.number().int().positive(),
+});
+
+export const laneCheckpointDraftContentSchema = laneCheckpointContentSchema.safeExtend({
+  completedReport: laneCompletedReportDraftSchema.nullable(),
 });
 
 export type LaneCheckpointContent = z.infer<typeof laneCheckpointContentSchema>;
@@ -181,6 +204,14 @@ export function validateLaneCheckpointCoverage(
   }
   if (content.status === "complete" && remaining.size > 0) {
     throw new Error("A complete lane checkpoint cannot have remaining entries");
+  }
+  const report = content.completedReport;
+  if (report && isSpecialistAxis(report.axis)) {
+    if (report.specialistChecks == null) throw new Error("A specialist report requires explicit coverage checks");
+    const checked = new Set(report.specialistChecks.flatMap((check) => check.entries));
+    if (checked.size !== expected.size || [...checked].some((index) => !expected.has(index))) {
+      throw new Error("Specialist checks must classify every manifest entry without expanding scope");
+    }
   }
 }
 

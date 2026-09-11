@@ -6,7 +6,7 @@ import { z } from "zod";
 import { trustedGitHubContext } from "../../src/github/trusted-context";
 import { reviewAxes } from "../../src/review/axes";
 import {
-  laneCheckpointContentSchema,
+  laneCheckpointDraftContentSchema,
   readLaneCheckpoint,
   validateLaneCheckpointCoverage,
   validateLaneCheckpointEvidenceProgress,
@@ -47,7 +47,7 @@ export const reviewLaneCheckpointInputSchema = z
       .enum(["read", "write"])
       .describe("Read the current checkpoint or replace it."),
     axis: z.enum(reviewAxes),
-    checkpoint: laneCheckpointContentSchema
+    checkpoint: laneCheckpointDraftContentSchema
       .nullable()
       .describe(
         "Use null for a read operation and checkpoint content for a write operation.",

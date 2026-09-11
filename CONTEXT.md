@@ -1,6 +1,6 @@
 # Domain context
 
-`known-good-review` has one job: evaluate a reviewable pull request and report
+Slop Sheriff has one job: evaluate a reviewable pull request and report
 the result. It cannot push, merge, approve repository changes, change settings,
 or act as a general-purpose GitHub assistant.
 
@@ -9,15 +9,30 @@ or act as a general-purpose GitHub assistant.
 - **Baseline:** the last successfully published canonical code-review v2
   artifact, its reviewed head, and per-file effective patch fingerprints.
 - **Full review:** the complete pull-request change reviewed once, across the
-  active review axes defined by the vendored `code-review` skill.
+  active review axes defined by this project.
 - **Delta review:** a fresh review whose finding scope is only files whose
   normalized pull-request patch changed since the baseline.
 - **Revalidation:** a separate evidence pass over selected prior findings. All
   unresolved Blocking/Important findings are selected; Improvements are
   selected only when their path or symbol is relevant to the delta.
 - **Review axis:** exactly one of `deduplication`, `claim-and-specification`,
-  `engineering-quality`, or conditional `discoverability`. “Mode”,
+  `engineering-quality`, `test-against-spec`, conditional `discoverability`,
+  conditional `test-health`, or conditional `writing-quality`. “Mode”,
   “perspective”, and arbitrary lane taxonomies are not synonyms for axes here.
+- **Test against specification:** observation of delivered behavior through a
+  real interface against explicit requirements, with each result recorded as
+  passed, failed, unverified, or out of scope. Source inspection alone cannot
+  establish a behavioral pass.
+- **Writing quality:** the clarity, accuracy and usefulness of changed prose,
+  UI strings and substantive comments. A finding identifies reader cost and a
+  concrete remedy; writing patterns do not establish AI authorship.
+- **Test health:** whether existing tests act as frozen consumer contracts for
+  public behavior. Expectations come from requirements before examining the
+  implementation; useful tests catch broken behavior and tolerate internal
+  refactors. Assertions that mirror implementation details are brittle evidence.
+- **Impact summary:** a consequence summary of at most 300 characters, displayed
+  with expandable full analysis. Presentation changes do not change finding
+  identity.
 - **Finding lane:** a bounded subagent used only to revalidate selected prior
   findings. It is not a new review axis.
 - **Effective patch:** normalized per-file PR change that ignores file ordering
@@ -56,9 +71,10 @@ base SHA, head SHA, selected plan, and patch identity are application-owned
 context. Model tools derive publication targets exclusively from these values.
 
 Repository content, PR titles/bodies/comments, diffs, prior finding text, and
-PR-produced artifact contents are untrusted evidence. The only policy file is
-`.github/known-good-review.yml`,
-read at the trusted base SHA. A PR cannot alter the policy that reviews itself.
+PR-produced artifact contents are untrusted evidence. Review policy comes from
+`.github/slop-sheriff.yml`, falling back to `.github/known-good-review.yml` only
+when the new filename is absent. The selected file is always read at the trusted base SHA.
+A PR cannot alter the policy that reviews itself.
 Models author review judgments and evidence content, but not report identity,
 prior finding selection, stable IDs, fresh finding status, skipped-axis
 coverage, verdict derivation, or publication targets. Typed application code

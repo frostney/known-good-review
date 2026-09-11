@@ -1,10 +1,53 @@
 import { defineEval } from "eve/evals";
+import { equals, includes } from "eve/evals/expect";
 
 export default defineEval({
   description:
-    "Proves the compiled Eve server can stream a routed root-copy child through production instrumentation.",
+    "Checks public GET/HEAD responses through compiled Eve routes and routed root-copy child streaming through production instrumentation.",
   tags: ["mock-model", "runtime-smoke"],
   async test(t) {
+    // Exercise production channel discovery and Nitro's compiled route names.
+    // Content and host-policy matrices remain in the landing unit tests.
+    for (const [path, contentType] of [
+      ["/", "text/html"],
+      ["/robots.txt", "text/plain"],
+      ["/sitemap.xml", "application/xml"],
+      ["/assets/slop-sheriff-hero.webp", "image/webp"],
+      ["/assets/slop-sheriff-icon.png", "image/png"],
+      ["/assets/slop-sheriff-social.jpg", "image/jpeg"],
+    ] as const) {
+      const get = await t.target.fetch(path);
+      await t.require(get.status, equals(200));
+      t.check(get.headers.get("content-type"), includes(contentType));
+      const body = await get.arrayBuffer();
+      t.check(body.byteLength > 0, equals(true));
+      if (path === "/robots.txt") {
+        t.check(new TextDecoder().decode(body), includes("Allow: /$\nAllow: /assets/\nDisallow: /eve/\n"));
+      }
+      const head = await t.target.fetch(path, { method: "HEAD" });
+      t.check(head.status, equals(200));
+      for (const header of ["content-type", "cache-control", "etag", "x-robots-tag"]) {
+        t.check(head.headers.get(header), equals(get.headers.get(header)));
+      }
+      t.check((await head.arrayBuffer()).byteLength, equals(0));
+    }
+    for (const method of ["GET", "HEAD"]) {
+      t.check((await t.target.fetch("/robots{.txt}", { method })).status, equals(404));
+    }
+
+    const budgetSession = t.newSession();
+    const budget = await budgetSession.send("KGR-EVAL-BUDGET-ROOT");
+    budget.expectOk();
+    budget.messageIncludes("BUDGET-RECONCILIATION-COMPLETE");
+    budget.calledTool("fixture_step", { count: 1 });
+    budget.noFailedActions();
+
+    const roleSession = t.newSession();
+    const roleTurn = await roleSession.send("KGR-EVAL-ROLE-ROOT");
+    roleTurn.expectOk();
+    roleTurn.messageIncludes("ROLE-RESOLUTION-COMPLETE");
+    roleTurn.noFailedActions();
+
     let turn = await t.send("KGR-EVAL-SUBAGENT-ROUTING");
     if (!t.sessionId) throw new Error("Expected a root session");
     // Delegation returns a working receipt in Eve 0.52. Continue reading the

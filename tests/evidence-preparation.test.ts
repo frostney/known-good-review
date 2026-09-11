@@ -7,6 +7,9 @@ import { prepareReviewEvidence } from "../src/review/prepare-review-evidence";
 import { readReviewEvidenceManifest, readReviewEvidencePatch } from "../src/review/evidence-bundle";
 import { prepareExactHeadGitHubEvidence } from "../src/review/github-evidence";
 import { parseReviewConfig } from "../src/config/review-config";
+import { readLaneReviewEvidencePacket } from "../src/review/lane-evidence";
+import { reviewAxes } from "../src/review/axes";
+import { digestCommonWorkValue } from "../src/review/common-work";
 
 async function git(cwd: string, ...args: string[]) {
   const child = Bun.spawn(["git", "-C", cwd, ...args], { stdout: "pipe", stderr: "pipe" });
@@ -29,8 +32,9 @@ test("prepares real Git patches for literal paths and trusted-base attributes", 
     await git(source, "config", "user.email", "fixture@example.test");
     await git(source, "config", "user.name", "Fixture");
     await mkdir(join(source, "src"));
-    const paths = ["src/[id].ts", "src/i.ts", "src/generated.ts", "src/odd: linguist-generated: true.ts"];
+    const paths = ["src/[id].ts", "src/i.ts", "src/generated.ts", "src/odd: linguist-generated: true.ts", "src/banner.png"];
     for (const path of paths) await writeFile(join(source, path), "old\n");
+    await writeFile(join(source, "src/banner.png"), Buffer.from([0, 1, 2]));
     await writeFile(join(source, "src/unrelated-whitespace.ts"), "unchanged   \n");
     await writeFile(join(source, ".gitattributes"), 'src/generated.ts linguist-generated\n"src/odd: linguist-generated: true.ts" linguist-generated\n');
     await git(source, "add", ".");
@@ -39,6 +43,7 @@ test("prepares real Git patches for literal paths and trusted-base attributes", 
     for (const [index, path] of paths.entries()) {
       await writeFile(join(source, path), `changed-${index}\n`);
     }
+    await writeFile(join(source, "src/banner.png"), Buffer.from([0, 3, 4]));
     await writeFile(join(source, ".gitattributes"), "");
     await git(source, "add", ".");
     await git(source, "commit", "--quiet", "-m", "head");
@@ -99,6 +104,8 @@ test("prepares real Git patches for literal paths and trusted-base attributes", 
       .toMatchObject({ kind: "excluded", classification: ["generated"] });
     expect(manifest.entries.find((entry) => entry.path === paths[3]))
       .toMatchObject({ kind: "excluded", classification: ["generated"] });
+    expect(manifest.entries.find((entry) => entry.path === "src/banner.png"))
+      .toMatchObject({ kind: "excluded", classification: ["binary"] });
     const patch = await readReviewEvidencePatch(runtime, manifest, { path: paths[0]!, cursor: 0 });
     expect(patch.content).toContain("+changed-0");
     expect(patch.content).not.toContain("changed-1");
@@ -107,6 +114,27 @@ test("prepares real Git patches for literal paths and trusted-base attributes", 
     expect(ledger.commonWork.history.paths).toEqual([...paths].sort());
     expect(ledger.commonWork.history.truncated).toBe(true);
     expect(ledger.probes.find((probe) => probe.id === "git-diff-check")?.outcome).toBe("passed");
+    expect(ledger.commonWork.records.find((record) => record.kind === "patch-manifest")?.outputDigest)
+      .toBe(digestCommonWorkValue(manifest));
+    for (const axis of reviewAxes) {
+      const packet = await readLaneReviewEvidencePacket(
+        runtime, ledger.identity, manifest, axis, `lane-${axis}`,
+      );
+      expect(packet.totalEntries).toBe(paths.length);
+      expect(packet.ledgerDigest).toBe(ledger.digest);
+    }
+    // Reusing the prepared snapshot must not fetch, probe, or regenerate it.
+    const unexpectedCollection = async (): Promise<never> => { throw new Error("Prepared evidence was recollected"); };
+    expect(await prepareReviewEvidence(runtime as unknown as RuntimeSandboxSession, trusted,
+      paths.map((path) => ({ path, status: "modified" })), {
+        planKind: "full", config: parseReviewConfig(null),
+        collectMemory: unexpectedCollection, collectGitHubEvidence: unexpectedCollection,
+        workspaceDependencies: { getMergeBase: unexpectedCollection, getInstallationToken: unexpectedCollection },
+      })).toEqual(ledger);
+    const changedManifest = structuredClone(manifest);
+    changedManifest.entries[0]!.patchTokens += 1;
+    await expect(readLaneReviewEvidencePacket(runtime, ledger.identity, changedManifest,
+      "engineering-quality", "tampered-lane")).rejects.toThrow("Prepared evidence components failed ledger validation");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

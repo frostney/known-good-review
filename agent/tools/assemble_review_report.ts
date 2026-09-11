@@ -6,7 +6,8 @@ import {
   stageReviewPublication,
 } from "../../src/github/publication";
 import { trustedGitHubContext } from "../../src/github/trusted-context";
-import { readLaneCheckpoint } from "../../src/review/lane-checkpoint";
+import { readLaneCheckpoint, type LaneCompletedReport } from "../../src/review/lane-checkpoint";
+import { retainSpecialistEvidence } from "../../src/review/specialist-report";
 import {
   assembleCanonicalReviewReport,
   reportAssemblyFailure,
@@ -56,6 +57,7 @@ export default defineTool({
       ctx.session.auth.current,
       sandbox,
     );
+    const completedReports: LaneCompletedReport[] = [];
     for (const axis of recovery.activeAxes) {
       const checkpoint = await readLaneCheckpoint(
         sandbox,
@@ -67,6 +69,7 @@ export default defineTool({
           "Canonical report assembly requires every exact lane checkpoint",
         );
       }
+      if (checkpoint.completedReport) completedReports.push(checkpoint.completedReport);
     }
 
     const current = currentReviewReportState(ctx.session.auth.current);
@@ -75,7 +78,7 @@ export default defineTool({
     try {
       const reviewState = await readLatestReviewState(octokit, trusted);
       const assembled = assembleCanonicalReviewReport({
-        draft,
+        draft: retainSpecialistEvidence(draft, completedReports),
         generatedAt: new Date().toISOString(),
         priorReport: reviewState?.baseline?.report ?? null,
         state: current,

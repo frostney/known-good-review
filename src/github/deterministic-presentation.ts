@@ -14,7 +14,28 @@ export interface FindingPresentation {
   readonly title: RichText;
   readonly evidence: readonly RichText[];
   readonly impact: RichText;
+  readonly impactSummary: string;
   readonly remedy: RichText;
+}
+
+export function escapeHtml(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+export function renderPlainText(value: string): string {
+  return escapeHtml(value).replace(/[\\`*_{}\[\]()#+.!|~-]/g, "\\$&");
+}
+
+/** Bound legacy excerpts without cutting surrogate pairs or combining sequences. */
+export function findingImpactSummary(finding: Pick<ReviewFinding, "impact" | "impactSummary">): string {
+  const source = (finding.impactSummary ?? finding.impact).replace(/\s+/gu, " ").trim();
+  if (source.length <= 300) return source;
+  let excerpt = "";
+  for (const { segment } of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(source)) {
+    if (excerpt.length + segment.length > 299) break;
+    excerpt += segment;
+  }
+  return `${excerpt.trimEnd()}…`;
 }
 
 function codeFence(value: string): string {
@@ -29,6 +50,13 @@ function codeFence(value: string): string {
 export function renderRichText(parts: RichText): string {
   return parts
     .map((part) => (part.kind === "code" ? codeFence(part.value) : part.value))
+    .join("");
+}
+
+/** Keep prose wrapping and code formatting without allowing authored HTML or Markdown structure. */
+export function renderSafeRichText(parts: RichText): string {
+  return parts
+    .map((part) => part.kind === "code" ? codeFence(part.value) : renderPlainText(part.value))
     .join("");
 }
 
@@ -102,6 +130,7 @@ export function deterministicFindingPresentation(
     title: deterministicParts(finding.title, finding),
     evidence: finding.evidence.map((value) => deterministicParts(value, finding)),
     impact: deterministicParts(finding.impact, finding),
+    impactSummary: findingImpactSummary(finding),
     remedy: deterministicParts(finding.remedy, finding),
   };
 }

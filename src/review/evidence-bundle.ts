@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { ReviewAxis } from "./axes";
 import { reviewAxes } from "./axes";
+import { specialistEntryScope } from "./specialist-scope";
 
 const revisionSchema = z.string().regex(/^[a-f0-9]{40}$/);
 const fingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -126,6 +127,8 @@ const packetEntrySchema = z.object({
   characterOffset: z.number().int().nonnegative(),
   content: z.string().optional(),
   nextCharacterOffset: z.number().int().nonnegative().nullable(),
+  obligation: z.string().optional(),
+  patchOmissionReason: z.string().optional(),
 });
 
 const reviewEvidencePacketSchema = z.object({
@@ -390,6 +393,7 @@ async function buildReviewEvidencePacket(
   sandbox: ReviewEvidenceSandbox,
   manifest: ReviewEvidenceManifest,
   progress: ReviewEvidenceProgress,
+  axis: ReviewAxis,
 ) {
   validateReviewEvidenceProgress(progress, manifest);
   if (progress.cursor === null) {
@@ -402,20 +406,37 @@ async function buildReviewEvidencePacket(
   }
   let entryIndex = progress.cursor.entryIndex;
   let characterOffset = progress.cursor.characterOffset;
-  let remainingCharacters = reviewEvidencePacketCharacters;
+  // Reserve the largest envelope this manifest can need, including completed
+  // indices and the continuation cursor. Every entry is charged as JSON below.
+  const envelopeCharacters = JSON.stringify({
+    entries: [],
+    completedEntries: manifest.entries.map((_, index) => index),
+    nextCursor: {
+      entryIndex: manifest.entries.length,
+      characterOffset: manifest.entries.reduce((largest, entry) => Math.max(largest, entry.patchCharacters), 0),
+    },
+    totalEntries: manifest.entries.length,
+  }).length;
+  let remainingCharacters = reviewEvidencePacketCharacters - envelopeCharacters;
   const entries: Array<z.infer<typeof packetEntrySchema>> = [];
   const completedEntries = [...progress.completedEntries];
 
   while (entryIndex < manifest.entries.length) {
     const entry = manifest.entries[entryIndex];
     if (!entry) break;
-    if (entry.kind === "excluded") {
-      entries.push({
+    const scope = specialistEntryScope(axis, entry.path);
+    if (entry.kind === "excluded" || scope?.includePatch === false) {
+      const candidate = {
         index: entryIndex,
         entry,
         characterOffset: 0,
         nextCharacterOffset: null,
-      });
+        ...(scope ? { obligation: scope.obligation, patchOmissionReason: entry.kind === "excluded" ? `Trusted-base classification: ${entry.classification.join(", ")}` : scope.reason } : {}),
+      };
+      const characters = JSON.stringify(candidate).length + 1;
+      if (characters > remainingCharacters) break;
+      entries.push(candidate);
+      remainingCharacters -= characters;
       completedEntries.push(entryIndex);
       entryIndex += 1;
       characterOffset = 0;
@@ -427,21 +448,49 @@ async function buildReviewEvidencePacket(
       cursor: characterOffset,
       maxCharacters: remainingCharacters,
     });
-    entries.push({
+    const candidate = {
       index: entryIndex,
       entry,
       characterOffset,
       content: patch.content,
       nextCharacterOffset: patch.nextCursor,
-    });
-    remainingCharacters -= patch.content.length;
-    if (patch.nextCursor !== null) {
-      characterOffset = patch.nextCursor;
+      ...(scope ? { obligation: scope.obligation } : {}),
+    };
+    if (JSON.stringify(candidate).length + 1 > remainingCharacters) {
+      // JSON escaping can expand patches. Find a fitting prefix without reading
+      // or hashing the source again, keeping UTF-16 surrogate pairs together.
+      let low = 0;
+      let high = patch.content.length;
+      const prefix = (length: number) => {
+        const previous = patch.content.charCodeAt(length - 1);
+        const next = patch.content.charCodeAt(length);
+        if (previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) length -= 1;
+        return patch.content.slice(0, length);
+      };
+      while (low < high) {
+        const middle = Math.ceil((low + high) / 2);
+        candidate.content = prefix(middle);
+        candidate.nextCharacterOffset = characterOffset + candidate.content.length;
+        if (JSON.stringify(candidate).length + 1 <= remainingCharacters) low = middle;
+        else high = middle - 1;
+      }
+      candidate.content = prefix(low);
+      candidate.nextCharacterOffset = characterOffset + candidate.content.length;
+      if (candidate.content.length === 0) break;
+    }
+    entries.push(candidate);
+    remainingCharacters -= JSON.stringify(candidate).length + 1;
+    if (candidate.nextCharacterOffset !== null) {
+      characterOffset = candidate.nextCharacterOffset;
       break;
     }
     completedEntries.push(entryIndex);
     entryIndex += 1;
     characterOffset = 0;
+  }
+
+  if (entries.length === 0) {
+    throw new Error("Review evidence metadata exceeds the packet budget");
   }
 
   return reviewEvidencePacketSchema.parse({
@@ -478,7 +527,7 @@ export async function readNextReviewEvidencePacket(
   if (existingReceipt !== null) {
     const receipt = packetReceiptSchema.parse(JSON.parse(existingReceipt));
     const expected = await buildReviewEvidencePacket(
-      sandbox, manifest, receipt.before,
+      sandbox, manifest, receipt.before, axis,
     );
     if (
       JSON.stringify(receipt.packet) !== JSON.stringify(expected) ||
@@ -515,7 +564,7 @@ export async function readNextReviewEvidencePacket(
   ))) {
     throw new Error("Review evidence progress is missing its checkpoint-bound receipt");
   }
-  const packet = await buildReviewEvidencePacket(sandbox, manifest, before);
+  const packet = await buildReviewEvidencePacket(sandbox, manifest, before, axis);
   const after = reviewEvidenceProgressSchema.parse({
     cursor: packet.nextCursor,
     completedEntries: packet.completedEntries,

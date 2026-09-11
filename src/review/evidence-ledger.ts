@@ -6,7 +6,7 @@ import {
   digestCommonWorkValue,
   type CommonReviewWork,
 } from "./common-work";
-import type { ReviewEvidenceManifest } from "./evidence-bundle";
+import { reviewEvidenceManifestSchema, type ReviewEvidenceManifest } from "./evidence-bundle";
 import {
   evidenceGapSchema,
   exactHeadGitHubEvidenceSchema,
@@ -123,6 +123,7 @@ export function assembleReviewEvidenceLedger(input: {
   readonly manifest: ReviewEvidenceManifest;
   readonly probes: readonly CommonEvidenceProbe[];
 }): ReviewEvidenceLedger {
+  const manifest = reviewEvidenceManifestSchema.parse(input.manifest);
   const identity = reviewEvidenceLedgerIdentitySchema.parse(input.identity);
   if (
     input.manifest.baseSha !== identity.baseSha ||
@@ -155,7 +156,7 @@ export function assembleReviewEvidenceLedger(input: {
     schemaVersion: 2,
     identity,
     components: {
-      patchManifestDigest: digestJson(input.manifest),
+      patchManifestDigest: digestJson(manifest),
       capabilityDigest: input.capabilities.digest,
       githubDigest: input.github.digest,
       probesDigest: digestJson(probes),
@@ -180,7 +181,7 @@ export function validateReviewEvidenceLedgerComponents(
   },
 ): void {
   if (
-    ledger.components.patchManifestDigest !== digestJson(input.manifest) ||
+    ledger.components.patchManifestDigest !== digestJson(reviewEvidenceManifestSchema.parse(input.manifest)) ||
     ledger.components.capabilityDigest !== input.capabilities.digest ||
     ledger.components.githubDigest !== ledger.github.digest ||
     ledger.components.probesDigest !== digestJson(ledger.probes) ||

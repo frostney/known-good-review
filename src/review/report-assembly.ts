@@ -277,6 +277,9 @@ const skippedAxisReasons = {
   deduplication: "Axis not activated by the trusted review plan.",
   "claim-and-specification": "Axis not activated by the trusted review plan.",
   "engineering-quality": "Axis not activated by the trusted review plan.",
+  "test-against-spec": "Axis not activated by the trusted review plan.",
+  "test-health": "No code, tests, or execution configuration matched the trusted review scope.",
+  "writing-quality": "No authored prose matched the trusted review scope.",
   discoverability:
     "No public web surface matched trusted review configuration.",
 } satisfies Readonly<Record<(typeof reviewAxes)[number], string>>;

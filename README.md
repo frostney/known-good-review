@@ -1,11 +1,18 @@
-# known-good-review
+# Slop Sheriff
 
-`known-good-review` is a review-only GitHub App built as a standalone Eve
+![Slop Sheriff robot with a cowboy hat, Review Notes book, and desert trail](docs/assets/slop-sheriff-brand.png)
+
+**Slop Sheriff** is a review-only GitHub App built as a standalone Eve
 application. It runs on Vercel, uses Vercel AI Gateway for models, inspects pull
 requests inside Vercel Sandbox, receives GitHub App events through Eve's native
 GitHub channel, and publishes aggregate and per-axis Checks, one visible result
 summary, and stable inline finding threads through the official Chat SDK GitHub
 adapter's typed Octokit surface.
+
+[Meet the sheriff](https://slop-sheriff.vercel.app) · [Self-hosting instructions](docs/install.md)
+
+Run your own sheriff on your own Vercel, Gateway and Convex accounts. There is
+no public hosted installation service.
 
 ## Lifecycle
 
@@ -38,9 +45,9 @@ flowchart TD
   only creates or updates the required Check on the current head.
 - A missing, malformed, or failed baseline never triggers an automatic
   replacement full review. A write/maintain/admin user can explicitly request
-  one with `@known-good-review run full review`.
+  one with `@slop-sheriff run full review`.
 - A current-head failure with validated checkpoints retains a sanitized retry
-  envelope. An authorized `@known-good-review continue` resumes only recorded
+  envelope. An authorized `@slop-sheriff continue` resumes only recorded
   missing stages in the same durable session; mismatched or ineligible state
   fails closed.
 - Selected-finding outcomes are persisted separately from coordinator history.
@@ -62,15 +69,18 @@ first review, an exact delta, a semantic no-op, and a lost baseline.
 
 ## Trusted repository configuration
 
-The only optional configuration is `.github/known-good-review.yml`. The app
-reads it from the pull request's base commit SHA, never from the proposed head.
-Unknown keys or models fail closed.
+The optional configuration is `.github/slop-sheriff.yml`. The app reads it
+from the pull request's base commit SHA, never from the proposed head. It reads
+`.github/known-good-review.yml` only when the new file is absent. An empty new
+file uses defaults; an invalid one fails closed. Unknown keys or models also
+fail closed.
 
 ```yaml
 model: openai/gpt-5.6-sol
 agents: moonshotai/kimi-k3
 profile: balanced
 blocking: false
+personality: true
 embedding: voyage/voyage-4
 embeddingDimension: 1024
 publicRoots:
@@ -86,7 +96,7 @@ publicRoots:
 Any currently listed AI Gateway language model with tool use is accepted;
 there is no model allowlist. Comma-separated IDs form an ordered fallback
 chain. `agents` is optional: a string applies one chain to every subagent,
-while a mapping can override exact `code-review` axes without creating a
+while a mapping can override project-owned review axes without creating a
 second lane system. `scout` defaults to `openai/gpt-5.6-luna` with xhigh
 reasoning and can be overridden like the axes:
 
@@ -97,8 +107,28 @@ agents:
   claim-and-specification: anthropic/claude-opus-5
   engineering-quality: openai/gpt-5.6-sol
   discoverability: moonshotai/kimi-k3
+  test-against-spec: openai/gpt-5.6-sol
+  test-health: openai/gpt-5.6-sol
+  writing-quality: openai/gpt-5.6-sol
   scout: openai/gpt-5.6-luna
 ```
+
+Set `personality: false` for plain review language. The default cowboy voice
+changes presentation only; it never changes evidence, severity, coverage, or
+blocking policy. Each finding has an impact summary of at most 300 characters
+and expandable full analysis. Existing reports retain their full impact and
+finding identity. See the [voice and visual guide](docs/brand.md).
+The [validation record](docs/validation/slop-sheriff.md) includes comment
+previews, policy measurements and the remaining real-model comparison work.
+
+The core reuse/design, claim/specification, and engineering-quality lanes
+remain active. The spec-testing lane checks explicit requirements through real
+interfaces. A conditional test-health lane checks affected tests as frozen
+consumer contracts: public outcomes, failure sensitivity and tolerance of
+internal refactors. Discoverability is conditional on public web content; writing
+quality activates for files that may contain authored prose, strings or
+comments. Specialist reports classify their scope and preserve failed and
+unverified results. An unavailable runtime never becomes a behavioral pass.
 
 The former `agents.commenter` key remains accepted for configuration
 compatibility but is ignored; publication formatting is deterministic.
@@ -132,7 +162,11 @@ only the explicitly listed fallbacks when the primary fails. Revalidation uses
 the scalar `agents` chain when present; a per-axis map leaves revalidation on
 the coordinator chain.
 
-Each active review axis receives its own Check Run. Axis Checks report
+Each active review axis receives its own Check Run under `slop-sheriff`.
+Existing `known-good-review` Checks and state remain readable during migration.
+The old command names also remain accepted.
+
+Axis Checks report
 execution health only: in progress while working, success after complete
 evidence coverage, skipped when a conditional axis does not apply, and
 action-required when an active axis cannot complete. The aggregate Check owns
@@ -196,10 +230,10 @@ delete.
 
 ## External setup
 
-For this audit release, follow the [app-first rollout and live validation
-procedure](docs/deployment.md), including the app/backend compatibility gate.
+Start with the [self-hosting instructions](docs/install.md), then use the
+[deployment and live validation guide](docs/deployment.md) for rollout.
 
-Provision the Connect-backed GitHub App with Eve's current setup flow, create
+Provision your Connect-backed GitHub App with the documented Connect commands, create
 the Convex deployment, deploy the app to Vercel, and install it on selected
 repositories. Set `KNOWN_GOOD_REVIEW_EVIDENCE_KEY` in the app environment to
 32 random bytes encoded as 64 hexadecimal characters. Keep it stable across
@@ -248,6 +282,12 @@ Do not add a second Chat SDK webhook route. The decorated Eve route owns inbound
 verification, lifecycle cleanup, durable PR sessions, checkout, and steering.
 The Chat SDK adapter is the typed outbound publication boundary for Check Runs,
 the result summary, inline finding threads, and installation-access API reads.
+
+The repository and visible product are named Slop Sheriff. Existing Connect
+identifiers, environment variable names, signed evidence paths, and durable
+state markers remain compatible. Renaming the GitHub App registration is a
+separate operational change; keep `GITHUB_BOT_USER_ID` pinned to that App
+when changing its login. See [brand migration](docs/brand.md#operational-migration).
 
 See [architecture](docs/architecture.md), [domain context](CONTEXT.md), and
 [skill provenance](docs/skill-provenance.md).

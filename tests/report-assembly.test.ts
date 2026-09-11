@@ -35,6 +35,7 @@ function finding(id: string, title: string): ReviewFinding {
     },
     evidence: ["The exact production replay retained this finding."],
     impact: `${title} can weaken the generated discovery contract.`,
+    impactSummary: "The generated discovery contract can weaken.",
     remedy: `Retain the tested correction for ${title}.`,
     status: "open",
     staticOnly: false,
@@ -267,6 +268,7 @@ describe("application-owned review report assembly", () => {
           location: { path: "src/review.ts", line: 1, symbol: null },
           evidence: ["The exact evidence supports the candidate."],
           impact: "The report could be incomplete.",
+          impactSummary: "The report could be incomplete.",
           remedy: "Keep the contract structurally aligned.",
           staticOnly: false,
           churn: candidateChurn,
@@ -360,6 +362,18 @@ describe("application-owned review report assembly", () => {
       {
         name: "discoverability",
         reason: "No public web surface matched trusted review configuration.",
+      },
+      {
+        name: "test-against-spec",
+        reason: "Axis not activated by the trusted review plan.",
+      },
+      {
+        name: "writing-quality",
+        reason: "No authored prose matched the trusted review scope.",
+      },
+      {
+        name: "test-health",
+        reason: "No code, tests, or execution configuration matched the trusted review scope.",
       },
     ]);
   });
