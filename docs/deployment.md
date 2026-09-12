@@ -77,7 +77,7 @@ Freeze the head and deployments while the review runs. Confirm the repository
 is included in the existing App installation and trusted-base policy remains
 advisory. Observe completion, exact-head publication, all required lane coverage,
 canonical finding identities, duplicate and false-positive control, impact
-summaries, and expandable detail. Failure or missing coverage is not completion.
+summaries, concise inline comments, and verified thread resolution. Failure or missing coverage is not completion.
 Return PR42 to draft after the terminal result before pushing any follow-up fix.
 Assess the result before enabling ongoing automatic self-review.
 
@@ -99,3 +99,13 @@ readers or validators. Preserve signed evidence, revocation records, and review
 state. A failed deployment should leave the prior production candidate serving;
 verify provider state rather than assuming rollback succeeded. Repair forward
 when compatibility cannot be established.
+
+## Public domain
+
+The canonical public address is `https://slop-sheriff.dev`. `www.slop-sheriff.dev` permanently redirects to that address. The existing Vercel
+project owns the domain, and GitHub's repository and App homepages point there.
+`src/landing/page.ts` supplies the shared origin for canonical, social-image and
+sitemap URLs. Only that exact hostname on a production deployment is indexable.
+The previous Vercel hostname remains an operational alias with noindex, allowing
+existing links and integration routes to keep working during migration. Connect
+callback and webhook URLs remain provider-managed endpoints.
